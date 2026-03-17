@@ -117,6 +117,10 @@ fn compute_crc(data: &[u8]) -> u32 {
     hasher.finalize()
 }
 
+pub fn verify_crc(data: &[u8], expected_crc: u32) -> bool {
+    compute_crc(data) == expected_crc
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

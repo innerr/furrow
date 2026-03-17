@@ -8,8 +8,8 @@ pub enum Error {
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
 
-    #[error("CRC mismatch: expected {expected:#010x}, got {actual:#010x}")]
-    CrcMismatch { expected: u32, actual: u32 },
+    #[error("CRC mismatch")]
+    CrcMismatch,
 
     #[error("Invalid record: {0}")]
     InvalidRecord(&'static str),
