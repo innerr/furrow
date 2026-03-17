@@ -1,6 +1,15 @@
 [package]
-name = "io"
+name = "furrow-io"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "fs", "io-util", "sync", "time", "macros"] }
+thiserror = "1"
+crc32fast = "1"
+bytes = "1"
+bitflags = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
+tempfile = "3"
