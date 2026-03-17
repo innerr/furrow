@@ -24,16 +24,16 @@ io/src/wal/
 ```
 
 **Tasks**:
-- [ ] Add dependencies to Cargo.toml
-- [ ] error.rs - Error types
-- [ ] config.rs - Configuration types
-- [ ] record.rs - Record format (Header + Payload)
-- [ ] allocator.rs - Atomic LSN/Offset allocator
-- [ ] file.rs - File management and header
-- [ ] writer.rs - Async writer with tokio::fs
-- [ ] reader.rs - Recovery reader
-- [ ] mod.rs - Public API (Wal struct)
-- [ ] Add sync API wrapper
+- [x] Add dependencies to Cargo.toml
+- [x] error.rs - Error types
+- [x] config.rs - Configuration types
+- [x] record.rs - Record format (Header + Payload)
+- [x] allocator.rs - Atomic LSN/Offset allocator
+- [x] file.rs - File management and header
+- [x] writer.rs - Async writer with tokio::fs
+- [x] reader.rs - Recovery reader
+- [x] mod.rs - Public API (Wal struct)
+- [x] Add sync API wrapper
 
 **Record Format**:
 ```
@@ -51,10 +51,10 @@ Total: 64 bytes
 ```
 
 **Unit Tests**:
-- [ ] Record encode/decode
-- [ ] CRC calculation/validation
-- [ ] LSN allocation atomicity
-- [ ] Config validation
+- [x] Record encode/decode
+- [x] CRC calculation/validation
+- [x] LSN allocation atomicity
+- [x] Config validation
 
 ---
 
@@ -63,19 +63,20 @@ Total: 64 bytes
 **Goal**: Support multiple file rotation and crash recovery
 
 **Tasks**:
-- [ ] file.rs - File rotation logic (size/time threshold)
-- [ ] File naming: `wal.{seq:06}.log`
-- [ ] Seal old file, activate new file
-- [ ] truncate() - Mark records as discardable
-- [ ] Delete files when all records discarded
-- [ ] Recovery - Scan all files, CRC validation
-- [ ] Skip PENDING/corrupted records
+- [x] file.rs - File rotation logic (size/time threshold)
+- [x] File naming: `wal.{seq:06}.log`
+- [x] Seal old file, activate new file
+- [x] truncate() - Mark records as discardable
+- [x] Delete files when all records discarded
+- [x] Recovery - Scan all files, CRC validation
+- [x] Skip PENDING/corrupted records
+- [x] RecoveryMode (Strict vs TolerateTailCorruption)
 
 **Integration Tests**:
-- [ ] Write → restart → read verification
-- [ ] File rotation correctness
-- [ ] Truncate behavior
-- [ ] Recovery with corrupted records
+- [x] Write → restart → read verification
+- [x] File rotation correctness
+- [x] Truncate behavior
+- [x] Recovery with corrupted records
 
 ---
 
@@ -239,8 +240,8 @@ pub enum RecoveryMode {
 
 ## Progress Tracking
 
-- Phase 1: [ ] 0%
-- Phase 2: [ ] 0%
+- Phase 1: [x] 100%
+- Phase 2: [x] 100%
 - Phase 3: [ ] 0%
 - Phase 4: [ ] 0%
 

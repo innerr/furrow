@@ -28,6 +28,8 @@ struct Inner {
     last_sync: Instant,
     next_seq: u32,
     max_file_size: u64,
+    max_file_age: Option<std::time::Duration>,
+    file_created_at: Instant,
     sync_mode: SyncMode,
 }
 
@@ -57,6 +59,8 @@ impl Wal {
             last_sync: Instant::now(),
             next_seq,
             max_file_size: config.max_file_size,
+            max_file_age: config.max_file_age,
+            file_created_at: Instant::now(),
             sync_mode: config.sync_mode,
         };
 
@@ -80,6 +84,7 @@ impl Wal {
             inner.next_offset = FILE_HEADER_SIZE;
             inner.current_file = Some(wal_file);
             inner.next_seq += 1;
+            inner.file_created_at = Instant::now();
         }
 
         Ok(())
@@ -92,7 +97,12 @@ impl Wal {
 
         let mut inner = self.inner.lock().await;
 
-        let needs_rotation = inner.next_offset + record_size > inner.max_file_size;
+        let size_exceeded = inner.next_offset + record_size > inner.max_file_size;
+        let time_exceeded = inner
+            .max_file_age
+            .map(|age| inner.file_created_at.elapsed() >= age)
+            .unwrap_or(false);
+        let needs_rotation = size_exceeded || time_exceeded;
 
         if needs_rotation {
             self.rotate_file(&mut inner).await?;
@@ -158,6 +168,7 @@ impl Wal {
         inner.current_file = Some(wal_file);
         inner.next_seq += 1;
         inner.bytes_since_sync = 0;
+        inner.file_created_at = Instant::now();
 
         Ok(())
     }
@@ -319,5 +330,65 @@ mod tests {
 
         wal.sync().unwrap();
         wal.close().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_file_rotation_by_size() {
+        let dir = tempdir().unwrap();
+        let config = WalConfig::new(dir.path())
+            .sync_mode(SyncMode::Always)
+            .max_file_size(1024);
+
+        let wal = Wal::open(config).await.unwrap();
+
+        for i in 0..50 {
+            let data = format!("record {:04}", i);
+            wal.write(data.as_bytes()).await.unwrap();
+        }
+
+        wal.sync().await.unwrap();
+        wal.close().await.unwrap();
+
+        let file_count = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .map(|e| e.file_name().to_string_lossy().starts_with("wal."))
+                    .unwrap_or(false)
+            })
+            .count();
+        assert!(file_count > 1);
+    }
+
+    #[tokio::test]
+    async fn test_file_rotation_by_time() {
+        use std::time::Duration;
+
+        let dir = tempdir().unwrap();
+        let config = WalConfig::new(dir.path())
+            .sync_mode(SyncMode::Always)
+            .max_file_size(1024 * 1024)
+            .max_file_age(Duration::from_millis(10));
+
+        let wal = Wal::open(config).await.unwrap();
+
+        wal.write(b"first file").await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        wal.write(b"second file after rotation").await.unwrap();
+
+        wal.sync().await.unwrap();
+        wal.close().await.unwrap();
+
+        let file_count = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .map(|e| e.file_name().to_string_lossy().starts_with("wal."))
+                    .unwrap_or(false)
+            })
+            .count();
+        assert!(file_count >= 2);
     }
 }
