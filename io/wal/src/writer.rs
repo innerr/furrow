@@ -17,7 +17,7 @@ pub use writer_impl::{Wal, WalSync};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wal::config::{SyncMode, WalConfig};
+    use crate::config::{SyncMode, WalConfig};
     use tempfile::tempdir;
 
     #[tokio::test]

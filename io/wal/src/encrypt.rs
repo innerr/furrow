@@ -3,7 +3,7 @@
 //! This module provides encryption functionality using AES-256-GCM.
 //! Only available when the `encryption` feature is enabled.
 
-use crate::wal::error::{Error, Result};
+use crate::error::{Error, Result};
 
 #[cfg(feature = "encryption")]
 use aes_gcm::{
