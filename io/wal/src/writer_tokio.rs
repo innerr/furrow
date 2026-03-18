@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use crate::config::{SyncMode, WalConfig};
 use crate::error::{Error, Result};
 use crate::file::{self as wal_file, WalFile, FILE_HEADER_SIZE};
-use crate::record::{Record, RecordHeader, HEADER_SIZE, MAX_RECORD_SIZE};
+use crate::record::{Record, RecordHeader, HEADER_SIZE, MAX_RECORD_SIZE, verify_crc};
 
 #[derive(Debug)]
 pub struct Wal {
@@ -42,23 +42,23 @@ impl Wal {
 
         let files = wal_file::list_wal_files(&dir).await?;
 
-        let (start_lsn, start_offset, next_seq) = if let Some((max_seq, path)) = files.last() {
+        let (start_lsn, next_seq) = if let Some((max_seq, path)) = files.last() {
             let mut wal_file = WalFile::open(path.clone()).await?;
-            let file_size = wal_file.write_offset;
-            let last_lsn = recover_last_lsn(&mut wal_file).await?;
-            (
-                last_lsn.map_or(0, |lsn| lsn + 1),
-                file_size,
-                max_seq + 1,
-            )
+            let info = recover_info(&mut wal_file).await?;
+
+            if info.last_valid_offset < wal_file.write_offset {
+                wal_file.truncate(info.last_valid_offset).await?;
+            }
+
+            (info.last_lsn.map_or(0, |lsn| lsn + 1), max_seq + 1)
         } else {
-            (0, FILE_HEADER_SIZE, 0)
+            (0, 0)
         };
 
         let inner = Inner {
             current_file: None,
             next_lsn: AtomicU64::new(start_lsn),
-            next_offset: start_offset,
+            next_offset: FILE_HEADER_SIZE,
             bytes_since_sync: 0,
             last_sync: Instant::now(),
             next_seq,
@@ -191,8 +191,9 @@ impl Wal {
 
         for (_, path) in &files {
             let mut wal_file = WalFile::open(path.clone()).await?;
-            if let Some(last) = recover_last_lsn(&mut wal_file).await? {
-                if last < lsn {
+            let info = recover_info(&mut wal_file).await?;
+            if let Some(last) = info.last_lsn {
+                if last <= lsn {
                     drop(wal_file);
                     fs::remove_file(path).await?;
                 }
@@ -215,10 +216,16 @@ impl Wal {
     }
 }
 
-async fn recover_last_lsn(wal_file: &mut WalFile) -> Result<Option<u64>> {
+struct RecoveryInfo {
+    last_lsn: Option<u64>,
+    last_valid_offset: u64,
+}
+
+async fn recover_info(wal_file: &mut WalFile) -> Result<RecoveryInfo> {
     let file_size = wal_file.write_offset;
     let mut offset = FILE_HEADER_SIZE;
     let mut last_lsn = None;
+    let mut last_valid_offset = FILE_HEADER_SIZE;
 
     while offset < file_size {
         if offset + HEADER_SIZE as u64 > file_size {
@@ -236,11 +243,22 @@ async fn recover_last_lsn(wal_file: &mut WalFile) -> Result<Option<u64>> {
             break;
         }
 
+        let data = wal_file
+            .read_at(offset + HEADER_SIZE as u64, header.len as usize)
+            .await?;
+        if !verify_crc(&data, header.crc) {
+            break;
+        }
+
         last_lsn = Some(header.lsn);
+        last_valid_offset = record_end;
         offset = record_end;
     }
 
-    Ok(last_lsn)
+    Ok(RecoveryInfo {
+        last_lsn,
+        last_valid_offset,
+    })
 }
 
 #[derive(Debug)]
