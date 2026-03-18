@@ -125,11 +125,11 @@ func GenerateRecommendations(scores map[string]int, diskClass types.DiskClass) [
 		recs = append(recs, "Suitable for general-purpose workloads")
 	}
 
-	if scores["fsync"] < 70 {
+	if score, ok := scores["fsync"]; ok && score < 70 {
 		recs = append(recs, "Consider enabling write-back cache if data integrity allows")
 	}
 
-	if scores["rand_write"] < 60 && diskClass != types.DiskClassSlowHDD {
+	if score, ok := scores["rand_write"]; ok && score < 60 && diskClass != types.DiskClassSlowHDD {
 		recs = append(recs, "Random write performance may benefit from larger queue depth")
 	}
 
