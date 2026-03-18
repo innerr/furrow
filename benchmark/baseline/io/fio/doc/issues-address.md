@@ -29,6 +29,12 @@ return int(total / weightSum)
 
 **Verification**: If all scores are 80 with equal weights, the result should be 80, not 8000.
 
+**Fix Applied**: 
+- Date: 2026-03-19
+- Commit: Pending PR
+- Change: Removed `* 100` from line 70 in `internal/report/json.go`
+- File: `internal/report/json.go:70`
+
 ---
 
 ### 2. fio bandwidth parsing uses the wrong JSON field

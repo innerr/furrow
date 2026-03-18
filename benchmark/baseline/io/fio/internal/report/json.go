@@ -67,7 +67,7 @@ func CalculateOverallScore(scores map[string]int) int {
 	if weightSum == 0 {
 		return 0
 	}
-	return int(total / weightSum * 100)
+	return int(total / weightSum)
 }
 
 func calculateScore(value float64, refs types.ReferenceValues) int {
