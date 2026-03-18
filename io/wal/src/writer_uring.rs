@@ -27,7 +27,7 @@ use tokio::sync::Mutex;
 use crate::config::{SyncMode, WalConfig};
 use crate::error::{Error, Result};
 use crate::file::{self as wal_file, FILE_HEADER_SIZE};
-use crate::record::{Record, RecordHeader, HEADER_SIZE, MAX_RECORD_SIZE};
+use crate::record::{Record, RecordHeader, HEADER_SIZE, MAX_RECORD_SIZE, verify_crc};
 
 #[derive(Debug)]
 pub struct Wal {
@@ -59,20 +59,23 @@ impl Wal {
         tokio::fs::create_dir_all(&dir).await?;
 
         let files = wal_file::list_wal_files_sync(&dir)?;
-        let (start_lsn, start_offset, next_seq) = if let Some((max_seq, path)) = files.last() {
+        let (start_lsn, next_seq) = if let Some((max_seq, path)) = files.last() {
             let file_size = get_file_size(path)?;
             let file = tokio_uring::fs::OpenOptions::new()
                 .read(true)
+                .write(true)
                 .open(path)
                 .await?;
-            let last_lsn = recover_last_lsn(file, file_size).await?;
-            (
-                last_lsn.map_or(0, |lsn| lsn + 1),
-                file_size,
-                max_seq + 1,
-            )
+            let info = recover_info(file, file_size).await?;
+
+            if info.last_valid_offset < file_size {
+                let (res, _) = file.set_len(info.last_valid_offset).await;
+                res?;
+            }
+
+            (info.last_lsn.map_or(0, |lsn| lsn + 1), max_seq + 1)
         } else {
-            (0, FILE_HEADER_SIZE, 0)
+            (0, 0)
         };
 
         let inner = Inner {
@@ -80,7 +83,7 @@ impl Wal {
             current_fd: -1,
             current_seq: 0,
             next_lsn: AtomicU64::new(start_lsn),
-            next_offset: start_offset,
+            next_offset: FILE_HEADER_SIZE,
             bytes_since_sync: 0,
             last_sync: Instant::now(),
             next_seq,
@@ -257,8 +260,9 @@ impl Wal {
                 .read(true)
                 .open(path)
                 .await?;
-            if let Some(last) = recover_last_lsn(file, file_size).await? {
-                if last < lsn {
+            let info = recover_info(file, file_size).await?;
+            if let Some(last) = info.last_lsn {
+                if last <= lsn {
                     tokio::fs::remove_file(path).await?;
                 }
             }
@@ -286,9 +290,15 @@ fn get_file_size(path: &std::path::Path) -> Result<u64> {
     Ok(metadata.len())
 }
 
-async fn recover_last_lsn(mut file: tokio_uring::fs::File, file_size: u64) -> Result<Option<u64>> {
+struct RecoveryInfo {
+    last_lsn: Option<u64>,
+    last_valid_offset: u64,
+}
+
+async fn recover_info(mut file: tokio_uring::fs::File, file_size: u64) -> Result<RecoveryInfo> {
     let mut offset = FILE_HEADER_SIZE;
     let mut last_lsn = None;
+    let mut last_valid_offset = FILE_HEADER_SIZE;
 
     while offset < file_size {
         if offset + HEADER_SIZE as u64 > file_size {
@@ -312,12 +322,26 @@ async fn recover_last_lsn(mut file: tokio_uring::fs::File, file_size: u64) -> Re
             break;
         }
 
+        let mut data_buf = vec![0u8; header.len as usize];
+        let (res, f) = file.read_exact_at(&mut data_buf, offset + HEADER_SIZE as u64).await;
+        match res {
+            Ok(_) => file = f,
+            Err(_) => break,
+        }
+
+        if !verify_crc(&data_buf, header.crc) {
+            break;
+        }
+
         last_lsn = Some(header.lsn);
+        last_valid_offset = record_end;
         offset = record_end;
-        file = f;
     }
 
-    Ok(last_lsn)
+    Ok(RecoveryInfo {
+        last_lsn,
+        last_valid_offset,
+    })
 }
 
 #[derive(Debug)]

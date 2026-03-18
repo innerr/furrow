@@ -212,6 +212,12 @@ impl WalFile {
         Ok(buf)
     }
 
+    pub async fn truncate(&mut self, len: u64) -> Result<()> {
+        self.file.set_len(len).await?;
+        self.write_offset = len;
+        Ok(())
+    }
+
     #[allow(dead_code)]
     pub fn seq(&self) -> u32 {
         self.header.seq

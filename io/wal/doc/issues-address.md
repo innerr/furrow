@@ -58,6 +58,43 @@
 
 **Validation**:
 - ✅ `cargo build` compiles without errors
+- ✅ All 18 tests pass (including new `test_lsn_persisted_correctly`)
+
+### Issue #3: Recovery Resets next_seq to Zero - FIXED (2026-03-19)
+
+- `src/writer_uring.rs:62-72`: Same change
+
+- Issue #6 (change `<` to `<=`)
+
+**Root Cause**: The sequence number from the recovered file was discarded. Pattern matched `(u32, PathBuf)` then used `_` for seq, then hardcoded `next_seq = 0`.
+
+**Fix**: Bind `max_seq` and use `max_seq + 1` as `next_seq` to continue the sequence correctly.
+
+**Validation**:
+- ✅ `cargo build` compiles without errors
+- ✅ All 18 tests pass
+
+### Issue #5: Recovery Appends After Corrupted Tail - FIXED (2026-03-19)
+
+- Added `verify_crc` import
+- Created `RecoveryInfo` struct with `last_lsn` and `last_valid_offset`
+- Replaced `recover_last_lsn()` with `recover_info()` with CRC validation
+- Modified `open()` to truncate file if `last_valid_offset < file_size`
+- Fixed `truncate()` to use `recover_info()` and correct boundary (`<=`)
+- Added `truncate()` method to `WalFile`
+
+**Root Cause**: Recovery only returned LSN, not offset. Corrupted file was never physically truncated, so corruption persists forever. Readers stop at first bad record.
+
+**Fix**: 
+1. Validate CRC during recovery
+2. Return `last_valid_offset` 
+3. Truncate file to remove corruption
+4. Also fixed Issue #6 by using `<=` instead of `<`
+
+**Important Note**: Per Reviewer's analysis, current implementation always creates a fresh file via `ensure_active_file()`, The main value is this fix is "repair the recovered file so readers operate on valid bytes only", not "resume appending at last_valid_offset". If append-to-existing-file semantics are added later, `last_valid_offset` must be used as the append offset.
+
+**Validation**:
+- ✅ `cargo build` compiles without errors
 - ✅ All 18 tests pass
 
 ---
