@@ -1,247 +1,231 @@
 # WAL Implementation Issues
 
 **Review Date**: 2026-03-18
-**Total Issues**: 10
+**Total Issues**: 11
 
 | Severity | Count |
 |----------|-------|
-| Critical (P0) | 3 |
-| Medium (P1) | 3 |
-| Minor (P2-P3) | 4 |
+| Critical (P0) | 5 |
+| Medium (P1) | 4 |
+| Minor (P2-P3) | 2 |
 
 ---
 
 ## Critical (P0) - Must Fix Before Production
 
-### 1. writer_uring.rs: Syntax Errors and Missing Methods
+### 1. Linux Backend Is Syntactically Broken
 
-**Location**: `io/src/wal/writer_uring.rs:135-195`
+**Location**:
+- `io/src/wal/writer.rs:11-15`
+- `io/src/wal/writer_uring.rs:137-195`
+- `io/src/wal/writer_uring.rs:330-357`
 
-**Impact**: Code cannot compile on Linux
+**Impact**: The crate cannot build on Linux, which is the platform that selects the io_uring backend by default.
 
-**Issue**:
-```
-Line 142: .map_err(...) without preceding expression
-Line 149: orphan '} else {' without matching 'if'
-Line 151: double semicolon ';;'
-Missing: write() method (called by tests but not defined)
-```
+**Evidence**:
+- `writer.rs` routes Linux builds to `writer_uring.rs`
+- `writer_uring.rs` contains invalid syntax (`.map_err(...)` without a receiver, stray `} else {`)
+- `rustfmt --edition 2021 --check wal/writer_uring.rs` fails before formatting with parse errors
+- The file also lacks a valid `Wal::write()` implementation even though tests call `wal.write(...)`
 
-**Root Cause**: Incomplete refactoring of `write_with_sync` method
-
-**Fix**: Rewrite `write_with_sync` and add proper `write()` method
-
-**Test Case**: `cargo build --target x86_64-unknown-linux-gnu`
+**Fix**: Reconstruct the Linux writer around a complete `write()` path, then add a Linux-targeted build/test job.
 
 ---
 
-### 2. LSN Not Written to Record Header
+### 2. Persisted Record Headers Store `lsn = 0`
 
-**Location**: `io/src/wal/writer_tokio.rs:94`
+**Location**:
+- `io/src/wal/writer_tokio.rs:93-112`
+- `io/src/wal/record.rs:102-108`
 
-**Impact**: All records have `lsn=0` in file, recovery cannot sort by LSN
+**Impact**: Records written by the tokio backend are persisted with `lsn = 0`, so recovery cannot rely on on-disk LSN ordering.
 
-**Issue**:
+**Evidence**:
 ```rust
-let record = Record::new(0, data.to_vec());  // LSN always 0
-let encoded = record.encode()?;               // encoded with LSN=0
-let lsn = inner.next_lsn.fetch_add(1, ...);   // real LSN allocated AFTER encode
-// encoded bytes [8:16] still contain 0, not the real LSN!
+let record = Record::new(0, data.to_vec());
+let encoded = record.encode()?;
+let lsn = inner.next_lsn.fetch_add(1, Ordering::Relaxed);
 ```
 
-**Root Cause**: LSN allocated after record is encoded
+`Record::encode()` serializes `self.lsn`, so allocating the real LSN after encoding leaves bytes `8..16` in the header as zero.
 
-**Fix Options**:
-1. Modify buffer bytes [8:16] after LSN allocation
-2. Allocate LSN before encoding
-3. Use separate header encoding step
-
-**Test Case**: Write records, close, reopen, verify LSN ordering
+**Fix**: Allocate the LSN before encoding, or patch the encoded buffer before writing.
 
 ---
 
-### 3. next_seq Incorrect After Recovery
+### 3. Recovery Resets `next_seq` to Zero and Reuses Old Filenames
 
-**Location**: `io/src/wal/writer_tokio.rs:49-52`
+**Location**:
+- `io/src/wal/writer_tokio.rs:45-52`
+- `io/src/wal/writer_uring.rs:62-72`
 
-**Impact**: After restart, new files start from `wal.000000.log`, overwriting existing files
+**Impact**: Reopening an existing WAL starts naming new files from `wal.000000.log` again, which can overwrite previously recovered data.
 
-**Issue**:
+**Evidence**:
 ```rust
-let (start_lsn, start_offset, next_seq) = if let Some((_, path)) = files.last() {
-    // ...
-    (last_lsn.map_or(0, |lsn| lsn + 1), file_size, 0)  // next_seq = 0 always!
-} else {
-    (0, FILE_HEADER_SIZE, 0)
-};
+if let Some((_, path)) = files.last() {
+    ...
+    (last_lsn.map_or(0, |lsn| lsn + 1), file_size, 0)
+}
 ```
 
-**Root Cause**: `next_seq` hardcoded to 0 instead of extracting from existing files
+The recovered sequence number from the last file is discarded instead of advancing to `last_seq + 1`.
 
-**Fix**:
-```rust
-let (start_lsn, start_offset, next_seq) = if let Some((seq, path)) = files.last() {
-    // ...
-    (last_lsn.map_or(0, |lsn| lsn + 1), file_size, seq + 1)
-} else {
-    (0, FILE_HEADER_SIZE, 0)
-};
-```
+**Fix**: Carry forward the highest recovered file sequence and create the next file with `seq + 1`.
 
-**Test Case**: Write to WAL, close, reopen, write again, verify file sequence continues
+---
+
+### 4. `truncate()` Can Delete the Active File While Writers Still Append to It
+
+**Location**:
+- `io/src/wal/writer_tokio.rs:191-200`
+- `io/src/wal/writer_uring.rs:252-264`
+
+**Impact**: After `truncate()` removes the currently open WAL file, later writes continue to the unlinked inode and disappear from directory-based recovery.
+
+**Evidence**:
+- `truncate()` scans filenames from disk and removes matching paths
+- It does not lock writer state long enough to exclude the active file
+- It does not compare against `inner.current_file` / `current_seq`
+- On Unix, removing an open file succeeds; the process can keep writing to a file that is no longer reachable by path
+
+**Fix**: Never unlink the active file. Rotate first or explicitly exclude the current file from truncation.
+
+---
+
+### 5. Recovery Appends After a Corrupted Tail Instead of After the Last Valid Record
+
+**Location**:
+- `io/src/wal/writer_tokio.rs:45-49`
+- `io/src/wal/writer_tokio.rs:220-245`
+- `io/src/wal/writer_uring.rs:62-69`
+- `io/src/wal/writer_uring.rs:290-321`
+- `io/src/wal/reader.rs:136-170`
+
+**Impact**: If the previous process crashed with a torn or corrupt tail, new records are appended after the bad bytes and become unreadable because recovery stops at the first bad tail.
+
+**Evidence**:
+- `open()` uses the physical file size as the next append offset
+- `recover_last_lsn()` returns only the last valid LSN, not the last valid offset
+- `reader.rs` stops scanning the current file on truncated header/data or CRC failure
+
+That combination means post-restart writes can land beyond corrupt tail bytes, but the reader never reaches them.
+
+**Fix**: Recovery must return both last valid LSN and last valid offset, then truncate the file back to that offset before accepting new writes.
 
 ---
 
 ## Medium (P1) - Should Fix Soon
 
-### 4. truncate() Has Confusing Semantics
+### 6. `truncate(lsn)` Uses the Wrong Boundary Condition
 
-**Location**: `io/src/wal/writer_tokio.rs:191-204`
+**Location**:
+- `io/src/wal/writer_tokio.rs:196-199`
+- `io/src/wal/writer_uring.rs:261-264`
+- `io/src/wal/doc/design.md:32-35`
 
-**Impact**: API behavior doesn't match typical truncate expectations
+**Impact**: Files whose last record is exactly `lsn` are retained even though the design says `truncate(lsn)` should discard records with `LSN <= lsn`.
 
-**Issue**:
+**Evidence**:
 ```rust
-if let Some(last) = recover_last_lsn(&mut wal_file).await? {
-    if last < lsn {  // Deletes files where ALL records have LSN < threshold
-        fs::remove_file(path).await?;
-    }
+if last < lsn {
+    remove_file(...)
 }
 ```
 
-**Problems**:
-- Name suggests truncating records within a file
-- Actually deletes entire files
-- Logic `last < lsn` is confusing (deletes older files, not newer)
+The condition should be `last <= lsn` if the implementation is following the design contract.
 
-**Fix Options**:
-1. Rename to `delete_files_before(lsn)`
-2. Fix logic if intended to remove records within current file
-3. Document current behavior clearly
+**Fix**: Align the implementation with the documented `<=` semantics, or rename the API if the contract is meant to be exclusive.
 
 ---
 
-### 5. String::leak() Causes Memory Leak
+### 7. Recovery Mode Configuration Is Ignored, and Ordered Iteration Drops Errors
 
-**Locations**:
-- `io/src/wal/compress.rs:36`
-- `io/src/wal/encrypt.rs:26, 58`
+**Location**:
+- `io/src/wal/config.rs:20`
+- `io/src/wal/writer_tokio.rs:207-208`
+- `io/src/wal/writer_uring.rs:271-272`
+- `io/src/wal/reader.rs:17-21`
+- `io/src/wal/reader.rs:32-35`
 
-**Impact**: Every error with dynamic message leaks heap memory
+**Impact**: Callers cannot actually enforce strict recovery through `WalConfig`, and `iter_ordered()` can silently hide corruption by discarding `Err` items.
 
-**Issue**:
-```rust
-Error::InvalidRecord(format!("decompression failed: {}", e).leak())
-```
+**Evidence**:
+- `WalConfig` stores `recovery_mode`, but neither writer passes it into `WalReader`
+- `Wal::reader()` always calls `WalReader::new(...)`, which hardcodes `TolerateTailCorruption`
+- `iter_ordered()` does `self.iter().filter_map(|r| r.ok())`, which drops every error before sorting
 
-**Fix Options**:
-1. Change Error enum to accept `String`:
-   ```rust
-   InvalidRecord(String),
-   InvalidConfig(String),
-   ```
-2. Use `Box<str>`:
-   ```rust
-   InvalidRecord(Box<str>),
-   ```
-3. Use `Cow<'static, str>` for flexibility
+**Fix**: Persist recovery mode in `Wal` and make `iter_ordered()` preserve errors instead of filtering them out.
 
 ---
 
-### 6. Missing Directory Sync After File Creation
+### 8. File Creation and Rotation Miss Directory `fsync`
 
-**Location**: `io/src/wal/file.rs:163-164`
+**Location**:
+- `io/src/wal/file.rs:152-165`
+- `io/src/wal/writer_uring.rs:110-120`
+- `io/src/wal/writer_uring.rs:210-220`
 
-**Impact**: New file entry may be lost on crash (file content synced but directory not)
+**Impact**: A crash after file creation can lose the directory entry even when the file contents themselves were synced.
 
-**Issue**:
-```rust
-file.write_all(&header_bytes).await?;
-file.sync_all().await?;  // Syncs file content
-// Missing: sync parent directory to persist the file entry
-```
+**Evidence**:
+- Newly created WAL files are `sync_all()`'d
+- Their parent directory is never synced afterward
 
-**Background**: To ensure a new file is crash-safe, both the file and its parent directory must be synced.
+**Fix**: After creating or rotating a WAL file, open the parent directory and `fsync` it as part of the durability path.
 
-**Fix**:
-```rust
-file.sync_all().await?;
+---
 
-// Sync directory
-let dir = std::fs::File::open(dir)?;
-dir.sync_all()?;
-```
+### 9. Dynamic Error Messages Leak Memory
+
+**Location**:
+- `io/src/wal/error.rs:14-27`
+- `io/src/wal/compress.rs:34-36`
+- `io/src/wal/encrypt.rs:25-33`
+- `io/src/wal/encrypt.rs:57-65`
+
+**Impact**: Every dynamic compression/encryption error leaks heap memory for the lifetime of the process.
+
+**Evidence**:
+- `Error::InvalidRecord` and `Error::InvalidConfig` require `&'static str`
+- Feature code converts `String` to `&'static str` with `.leak()` to satisfy the type
+
+**Fix**: Change those error variants to own their message (`String`, `Box<str>`, or `Cow<'static, str>`).
 
 ---
 
 ## Minor (P2-P3) - Nice to Have
 
-### 7. uring_advanced.rs Not Actually Used
+### 10. Configuration Surface Includes Unimplemented Options
 
-**Location**: `io/src/wal/uring_advanced.rs`
+**Location**:
+- `io/src/wal/config.rs:18-20`
+- `io/src/wal/writer_tokio.rs:40-42`
+- `io/src/wal/writer_uring.rs:58-60`
 
-**Issue**: Framework code for `RegisteredFiles`, `LinkedOps`, `BatchSubmit` exists but is never integrated into `writer_uring.rs`
+**Impact**: Callers can set options that have no effect, which makes the API misleading.
 
-**Options**:
-1. Delete the file (it's incomplete anyway)
-2. Actually integrate these utilities into the writer
-3. Mark as `#[doc(hidden)]` with TODO note
+**Evidence**:
+- `preallocate_size` is validated and stored but never used during file creation
+- `create_if_missing` is stored but both writers always call `create_dir_all(...)`
+- `recovery_mode` is stored but ignored by `Wal::reader()` (see issue 7)
 
----
-
-### 8. preallocate_size Config Not Implemented
-
-**Location**: `io/src/wal/config.rs:18`
-
-**Issue**:
-```rust
-pub preallocate_size: u64,  // Config exists
-// But never used in file.rs or writer_*.rs
-```
-
-**Options**:
-1. Implement file preallocation (posix_fallocate on Linux)
-2. Remove config option
+**Fix**: Either implement these options or remove them from the public config until they are supported.
 
 ---
 
-### 9. create_if_missing Not Implemented
+### 11. `uring_advanced.rs` Is Framework Code With No Integration Path
 
-**Location**: `io/src/wal/config.rs:19`
+**Location**:
+- `io/src/wal/uring_advanced.rs`
 
-**Issue**:
-```rust
-pub create_if_missing: bool,  // Config exists
-// But directory is always created: fs::create_dir_all(&dir).await?
-```
+**Impact**: The module adds maintenance surface and implies optimizations that the actual Linux writer never uses.
 
-**Fix**:
-```rust
-if self.create_if_missing {
-    fs::create_dir_all(&dir).await?;
-} else {
-    // Check if directory exists
-}
-```
+**Evidence**:
+- `RegisteredFiles`, `LinkedOps`, and `BatchSubmit` are not referenced by `writer_uring.rs`
+- The current Linux writer does not integrate any of the advanced helpers
 
----
-
-### 10. Error Type Only Accepts &'static str
-
-**Location**: `io/src/wal/error.rs:14-15, 26`
-
-**Issue**:
-```rust
-InvalidRecord(&'static str),
-InvalidConfig(&'static str),
-// Cannot use format!() without .leak()
-```
-
-**Fix**:
-```rust
-InvalidRecord(Box<str>),  // or String
-InvalidConfig(Box<str>),
-```
+**Fix**: Either wire the helpers into the Linux writer, or remove the module until there is a real integration plan.
 
 ---
 
@@ -249,25 +233,14 @@ InvalidConfig(Box<str>),
 
 | # | Issue | Severity | Status |
 |---|-------|----------|--------|
-| 1 | writer_uring.rs syntax errors | P0 | ❌ Broken |
-| 2 | LSN not written to record | P0 | ❌ Data loss |
-| 3 | next_seq incorrect after recovery | P0 | ❌ File corruption |
-| 4 | truncate() semantics confusing | P1 | ⚠️ API issue |
-| 5 | String::leak() memory leak | P1 | ⚠️ Memory issue |
-| 6 | Missing directory sync | P1 | ⚠️ Crash safety |
-| 7 | uring_advanced.rs unused | P2 | 💤 Dead code |
-| 8 | preallocate_size not implemented | P3 | 💤 Dead config |
-| 9 | create_if_missing not implemented | P3 | 💤 Dead config |
-| 10 | Error type limitation | P3 | 💤 Usability |
-
----
-
-## Recommended Fix Order
-
-1. **[P0]** Fix writer_uring.rs (required for Linux)
-2. **[P0]** Fix LSN write (required for correct recovery)
-3. **[P0]** Fix next_seq recovery (required for crash recovery)
-4. **[P1]** Fix memory leak in error handling
-5. **[P1]** Add directory sync
-6. **[P1]** Clarify truncate() semantics
-7. **[P2+]** Clean up dead code/configs
+| 1 | Linux backend does not parse/build | P0 | Confirmed |
+| 2 | Persisted LSN stays zero in tokio writer | P0 | Confirmed |
+| 3 | Recovery resets file sequence | P0 | Confirmed |
+| 4 | `truncate()` can unlink the active WAL file | P0 | Confirmed |
+| 5 | Recovery appends after corrupted tail | P0 | Confirmed |
+| 6 | `truncate(lsn)` uses `<` instead of `<=` | P1 | Confirmed |
+| 7 | Recovery mode config ignored; ordered iteration drops errors | P1 | Confirmed |
+| 8 | Missing directory `fsync` on create/rotate | P1 | Confirmed |
+| 9 | Error API forces `.leak()` memory leaks | P1 | Confirmed |
+| 10 | `WalConfig` exposes unimplemented options | P3 | Confirmed |
+| 11 | `uring_advanced.rs` is unused | P3 | Confirmed |
