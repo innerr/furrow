@@ -125,12 +125,14 @@ impl Wal {
                 .open(&path)
                 .await?;
 
-            let (res, file) = file.write_all_at(&header_bytes, 0).await;
-            res?;
-            let (res, file) = file.sync_all().await;
-            res?;
+        let (res, file) = file.write_all_at(&header_bytes, 0).await;
+        res?;
+        let (res, file) = file.sync_all().await;
+        res?;
 
-            let fd = file.as_raw_fd();
+        sync_dir(&self.dir).await?;
+
+        let fd = file.as_raw_fd();
 
             inner.next_offset = FILE_HEADER_SIZE;
             inner.current_file = Some(file);
@@ -224,6 +226,8 @@ impl Wal {
         res?;
         let (res, file) = file.sync_all().await;
         res?;
+
+        sync_dir(&self.dir).await?;
 
         let fd = file.as_raw_fd();
 
@@ -324,6 +328,16 @@ impl Wal {
 fn get_file_size(path: &std::path::Path) -> Result<u64> {
     let metadata = std::fs::metadata(path)?;
     Ok(metadata.len())
+}
+
+async fn sync_dir(dir: &Path) -> Result<()> {
+    let dir_file = tokio_uring::fs::OpenOptions::new()
+        .read(true)
+        .open(dir)
+        .await?;
+    let (res, _) = dir_file.sync_all().await;
+    res?;
+    Ok(())
 }
 
 struct RecoveryInfo {
