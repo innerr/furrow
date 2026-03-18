@@ -27,7 +27,7 @@ use tokio::sync::Mutex;
 use crate::config::{SyncMode, WalConfig};
 use crate::error::{Error, Result};
 use crate::file::{self as wal_file, FILE_HEADER_SIZE};
-use crate::record::{Record, RecordHeader, HEADER_SIZE};
+use crate::record::{Record, RecordHeader, HEADER_SIZE, MAX_RECORD_SIZE};
 
 #[derive(Debug)]
 pub struct Wal {
@@ -132,52 +132,47 @@ impl Wal {
         Ok(())
     }
 
-    /// Write with automatic fsync if needed (SyncMode::Always).
-    /// Uses linked operations to ensure write + sync are atomic.
-    async fn write_with_sync(&self, data: &[u8], offset: u64) -> Result<()> {
-        let inner = self.inner.lock().await;
-        let file = inner.current_file.as_ref().ok_or(Error::Closed)?;
+    pub async fn write(&self, data: &[u8]) -> Result<u64> {
+        use crate::record::MAX_RECORD_SIZE;
 
-        // For SyncMode::Always, use linked write + sync
-        let (res, file) = file.write_at(&data, offset).await;
-            .map_err(Error::into(Error::InvalidRecord("write failed")))?;
-        let (res, file) = file.sync_all().await
-            .map_err(error::into(error::InvalidRecord("sync failed")))?;
-        let _ = res?;
+        let estimated_size = HEADER_SIZE as u64 + data.len() as u64;
+        if estimated_size as usize > MAX_RECORD_SIZE {
+            return Err(Error::RecordTooLarge {
+                size: estimated_size as usize,
+                max: MAX_RECORD_SIZE,
+            });
+        }
 
-        Ok(())
-    } else {
-        // For other sync modes, use regular write
-        let (res, file) = file.write_at(&data, offset).await?;;
+        let mut inner = self.inner.lock().await;
+
+        let size_exceeded = inner.next_offset + estimated_size > inner.max_file_size;
+        let time_exceeded = inner
+            .max_file_age
+            .map(|age| inner.file_created_at.elapsed() >= age)
+            .unwrap_or(false);
+
+        if size_exceeded || time_exceeded {
+            self.rotate_file(&mut inner).await?;
+        }
 
         let lsn = inner.next_lsn.fetch_add(1, Ordering::Relaxed);
+        let record = Record::new(lsn, data.to_vec());
+        let encoded = record.encode()?;
+        let record_size = encoded.len() as u64;
+
         let offset = inner.next_offset;
-        let sync_mode = inner.sync_mode.clone();
-        let bytes_threshold = if let SyncMode::Batch { bytes, .. } = &sync_mode {
-            Some(*bytes)
-        } else {
-            None
-        };
-        let time_threshold = if let SyncMode::Batch { time, .. } = &sync_mode {
-            Some(*time)
-        } else {
-            None
-        };
-
         let file = inner.current_file.as_ref().ok_or(Error::Closed)?;
-
         let (res, file) = file.write_all_at(&encoded, offset).await;
         res?;
-
         inner.current_file = Some(file);
+
         inner.next_offset += record_size;
         inner.bytes_since_sync += record_size;
 
-        let should_sync = match &sync_mode {
+        let should_sync = match &inner.sync_mode {
             SyncMode::Always => true,
-            SyncMode::Batch { .. } => {
-                inner.bytes_since_sync >= bytes_threshold.unwrap()
-                    || inner.last_sync.elapsed() >= time_threshold.unwrap()
+            SyncMode::Batch { bytes, time } => {
+                inner.bytes_since_sync >= *bytes || inner.last_sync.elapsed() >= *time
             }
             SyncMode::Never => false,
         };
