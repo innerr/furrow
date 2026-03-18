@@ -121,6 +121,24 @@ pub async fn list_wal_files(dir: &Path) -> Result<Vec<(u32, PathBuf)>> {
     Ok(files)
 }
 
+#[cfg(target_os = "linux")]
+pub fn list_wal_files_sync(dir: &Path) -> Result<Vec<(u32, PathBuf)>> {
+    let entries = std::fs::read_dir(dir)?;
+    let mut files = Vec::new();
+
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if let Some(seq) = parse_filename(&name) {
+            files.push((seq, entry.path()));
+        }
+    }
+
+    files.sort_by_key(|(seq, _)| *seq);
+    Ok(files)
+}
+
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct WalFile {
