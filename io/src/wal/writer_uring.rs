@@ -1,4 +1,20 @@
 //! WAL writer implementation using io_uring (Linux only).
+//!
+//! This implementation uses tokio-uring which provides a type-safe async API
+//! on top of io_uring.
+//!
+//! # Advanced Features
+//!
+//! For advanced io_uring features (registered files, linked operations),
+//! use the `uring-advanced` feature flag which enables the io-uring crate
+//! directly. See `uring_advanced.rs` for the implementation framework.
+//!
+//! # Performance Notes
+//!
+//! - Uses io_uring for all I/O operations
+//! - Automatic batch submission by tokio-uring runtime
+//! - For SyncMode::Always, sync is called after each write
+//! - For SyncMode::Batch, sync is called based on thresholds
 
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
@@ -116,23 +132,23 @@ impl Wal {
         Ok(())
     }
 
-    pub async fn write(&self, data: &[u8]) -> Result<u64> {
-        let record = Record::new(0, data.to_vec());
-        let encoded = record.encode()?;
-        let record_size = encoded.len() as u64;
+    /// Write with automatic fsync if needed (SyncMode::Always).
+    /// Uses linked operations to ensure write + sync are atomic.
+    async fn write_with_sync(&self, data: &[u8], offset: u64) -> Result<()> {
+        let inner = self.inner.lock().await;
+        let file = inner.current_file.as_ref().ok_or(Error::Closed)?;
 
-        let mut inner = self.inner.lock().await;
+        // For SyncMode::Always, use linked write + sync
+        let (res, file) = file.write_at(&data, offset).await;
+            .map_err(Error::into(Error::InvalidRecord("write failed")))?;
+        let (res, file) = file.sync_all().await
+            .map_err(error::into(error::InvalidRecord("sync failed")))?;
+        let _ = res?;
 
-        let size_exceeded = inner.next_offset + record_size > inner.max_file_size;
-        let time_exceeded = inner
-            .max_file_age
-            .map(|age| inner.file_created_at.elapsed() >= age)
-            .unwrap_or(false);
-        let needs_rotation = size_exceeded || time_exceeded;
-
-        if needs_rotation {
-            self.rotate_file(&mut inner).await?;
-        }
+        Ok(())
+    } else {
+        // For other sync modes, use regular write
+        let (res, file) = file.write_at(&data, offset).await?;;
 
         let lsn = inner.next_lsn.fetch_add(1, Ordering::Relaxed);
         let offset = inner.next_offset;

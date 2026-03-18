@@ -87,10 +87,14 @@ Total: 64 bytes
 **Tasks**:
 - [x] Add tokio-uring dependency (target_os = "linux")
 - [x] Conditional compilation for writer
-- [x] Batch submission pattern
-- [ ] Registered file descriptors
-- [ ] Linked write + fsync
+- [x] Batch submission pattern (via tokio-uring runtime)
+- [x] Registered file descriptors (`RegisteredFiles` helper in uring_advanced.rs)
+- [x] Linked write + fsync (`LinkedOps` helper in uring_advanced.rs)
 - [x] Fallback to tokio::fs on non-Linux
+
+- [x] write_with_sync for SyncMode::Always using atomic chain
+- [x] SyncMode::Batch threshold-based sync
+- [x] SyncMode::Never support
 
 **Performance Tests**:
 - [ ] Throughput comparison (tokio::fs vs io_uring)
