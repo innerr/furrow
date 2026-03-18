@@ -212,6 +212,35 @@
 - ✅ `cargo build` compiles without errors
 - ✅ All 18 tests pass
 
+### Issue #9: Dynamic Error Messages Leak Memory - FIXED (2026-03-19)
+
+**Commit**: TBD
+
+**Actions Taken**:
+1. Changed `InvalidRecord`, `InvalidHeader`, `InvalidConfig`, and `InvalidLsn` from `&'static str` to `String` in `error.rs`
+2. Updated all 20+ call sites to use `.into()` or `.to_string()` instead of `.leak()`
+
+**Root Cause**: Error variants used `&'static str`, forcing dynamic error messages to call `.leak()` which permanently leaked heap memory on every error.
+
+**Fix**: Changed error variants to own their message via `String`, eliminating need for `.leak()`.
+
+**Code Changes**:
+- `src/error.rs`: Changed 4 variants from `&'static str` to `String`
+- 10 other files: Updated all error creation sites to pass owned strings
+
+**Files Updated**:
+- `src/config.rs`: 2 call sites
+- `src/file.rs`: 3 call sites  
+- `src/record.rs`: 2 call sites
+- `src/reader.rs`: 4 call sites
+- `src/compress.rs`: 2 call sites (removed `.leak()`)
+- `src/encrypt.rs`: 6 call sites (removed `.leak()`)
+- `src/uring_advanced.rs`: 1 call site
+
+**Validation**:
+- ✅ `cargo build` compiles without errors
+- ✅ All 18 tests pass
+
 ---
 
 ## Critical (P0) - Must Fix Before Production

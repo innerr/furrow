@@ -23,14 +23,14 @@ pub const NONCE_SIZE: usize = 12;
 #[cfg(feature = "encryption")]
 pub fn encrypt(data: &[u8], key: &EncryptionKey) -> Result<Vec<u8>> {
     let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|e| Error::InvalidConfig(format!("invalid key: {}", e).leak()))?;
+        .map_err(|e| Error::InvalidConfig(format!("invalid key: {}", e)))?;
 
     let nonce_bytes: [u8; NONCE_SIZE] = rand::random();
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     let ciphertext = cipher
         .encrypt(nonce, data)
-        .map_err(|e| Error::InvalidRecord(format!("encryption failed: {}", e).leak()))?;
+        .map_err(|e| Error::InvalidRecord(format!("encryption failed: {}", e)))?;
 
     let mut result = Vec::with_capacity(NONCE_SIZE + ciphertext.len());
     result.extend_from_slice(&nonce_bytes);
@@ -42,7 +42,7 @@ pub fn encrypt(data: &[u8], key: &EncryptionKey) -> Result<Vec<u8>> {
 /// Encrypts data (stub when encryption feature is disabled).
 #[cfg(not(feature = "encryption"))]
 pub fn encrypt(_data: &[u8], _key: &EncryptionKey) -> Result<Vec<u8>> {
-    Err(Error::InvalidConfig("encryption feature not enabled"))
+    Err(Error::InvalidConfig("encryption feature not enabled".into()))
 }
 
 /// Decrypts data using AES-256-GCM.
@@ -51,24 +51,24 @@ pub fn encrypt(_data: &[u8], _key: &EncryptionKey) -> Result<Vec<u8>> {
 #[cfg(feature = "encryption")]
 pub fn decrypt(encrypted: &[u8], key: &EncryptionKey) -> Result<Vec<u8>> {
     if encrypted.len() < NONCE_SIZE + 16 {
-        return Err(Error::InvalidRecord("encrypted data too short"));
+        return Err(Error::InvalidRecord("encrypted data too short".into()));
     }
 
     let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|e| Error::InvalidConfig(format!("invalid key: {}", e).leak()))?;
+        .map_err(|e| Error::InvalidConfig(format!("invalid key: {}", e)))?;
 
     let (nonce_bytes, ciphertext) = encrypted.split_at(NONCE_SIZE);
     let nonce = Nonce::from_slice(nonce_bytes);
 
     cipher
         .decrypt(nonce, ciphertext)
-        .map_err(|e| Error::InvalidRecord(format!("decryption failed: {}", e).leak()))
+        .map_err(|e| Error::InvalidRecord(format!("decryption failed: {}", e)))
 }
 
 /// Decrypts data (stub when encryption feature is disabled).
 #[cfg(not(feature = "encryption"))]
 pub fn decrypt(_encrypted: &[u8], _key: &EncryptionKey) -> Result<Vec<u8>> {
-    Err(Error::InvalidConfig("encryption feature not enabled"))
+    Err(Error::InvalidConfig("encryption feature not enabled".into()))
 }
 
 /// Generates a random encryption key.

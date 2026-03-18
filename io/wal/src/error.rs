@@ -12,10 +12,10 @@ pub enum Error {
     CrcMismatch,
 
     #[error("Invalid record: {0}")]
-    InvalidRecord(&'static str),
+    InvalidRecord(String),
 
     #[error("Invalid file header: {0}")]
-    InvalidHeader(&'static str),
+    InvalidHeader(String),
 
     #[error("File not found: {0}")]
     FileNotFound(String),
@@ -24,7 +24,7 @@ pub enum Error {
     Closed,
 
     #[error("Invalid configuration: {0}")]
-    InvalidConfig(&'static str),
+    InvalidConfig(String),
 
     #[error("Record too large: size={size}, max={max}")]
     RecordTooLarge { size: usize, max: usize },
@@ -36,7 +36,7 @@ pub enum Error {
     NoWalFiles,
 
     #[error("Invalid LSN: {0}")]
-    InvalidLsn(&'static str),
+    InvalidLsn(String),
 
     #[error("Transaction not found: {0}")]
     TransactionNotFound(u64),

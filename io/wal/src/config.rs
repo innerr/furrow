@@ -77,10 +77,10 @@ impl WalConfig {
 
     pub fn validate(&self) -> Result<()> {
         if self.max_file_size == 0 {
-            return Err(Error::InvalidConfig("max_file_size must be > 0"));
+            return Err(Error::InvalidConfig("max_file_size must be > 0".into()));
         }
         if self.preallocate_size == 0 {
-            return Err(Error::InvalidConfig("preallocate_size must be > 0"));
+            return Err(Error::InvalidConfig("preallocate_size must be > 0".into()));
         }
         Ok(())
     }

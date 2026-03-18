@@ -37,7 +37,7 @@ impl RegisteredFiles {
     /// valid for the lifetime of the registration.
     pub unsafe fn register(&mut self, index: usize, fd: RawFd) -> Result<()> {
         if index >= MAX_REGISTERED_FILES {
-            return Err(Error::InvalidConfig("file index out of range"));
+            return Err(Error::InvalidConfig("file index out of range".into()));
         }
         self.files[index] = Some(fd);
         Ok(())
