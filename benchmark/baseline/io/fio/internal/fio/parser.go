@@ -140,22 +140,22 @@ func extractMetricsFromJob(job *FioJob) (*types.TestMetrics, error) {
 	rw := determineRW(job)
 	if rw == "read" || rw == "randread" {
 		metrics.BandwidthBytes = uint64(job.Read.IOBytes)
-		metrics.BandwidthMBps = float64(job.Read.BandwidthAgg) / 1024
+		metrics.BandwidthMBps = float64(job.Read.Bandwidth) / 1024
 		metrics.IOPS = job.Read.IOPS
 		extractLatency(&job.Read, metrics)
 	} else if rw == "write" || rw == "randwrite" {
 		metrics.BandwidthBytes = uint64(job.Write.IOBytes)
-		metrics.BandwidthMBps = float64(job.Write.BandwidthAgg) / 1024
+		metrics.BandwidthMBps = float64(job.Write.Bandwidth) / 1024
 		metrics.IOPS = job.Write.IOPS
 		extractLatency(&job.Write, metrics)
 	} else if rw == "randrw" {
 		metrics.BandwidthBytes = uint64(job.Read.IOBytes + job.Write.IOBytes)
-		metrics.BandwidthMBps = float64(job.Read.BandwidthAgg+job.Write.BandwidthAgg) / 1024
+		metrics.BandwidthMBps = float64(job.Read.Bandwidth+job.Write.Bandwidth) / 1024
 		metrics.IOPS = job.Read.IOPS + job.Write.IOPS
 		extractLatency(&job.Read, metrics)
 	} else {
 		metrics.BandwidthBytes = uint64(job.Read.IOBytes + job.Write.IOBytes)
-		metrics.BandwidthMBps = float64(job.Read.BandwidthAgg+job.Write.BandwidthAgg) / 1024
+		metrics.BandwidthMBps = float64(job.Read.Bandwidth+job.Write.Bandwidth) / 1024
 		metrics.IOPS = job.Read.IOPS + job.Write.IOPS
 	}
 
