@@ -153,9 +153,13 @@ func runBenchmark() error {
 		rawLogs[testName] = result.RawLog
 	}
 
+	if len(results) == 0 {
+		return fmt.Errorf("all deep tests failed, cannot generate report")
+	}
+
 	reportData := buildReport(targetFS, sampleResult, strategy, results, rawLogs, runner, collector, testFileSize, testFile)
 
-	if err := saveReport(reportData, runOutput); err != nil {
+	if err := saveReport(reportData, runOutput, len(results), len(strategy.TestsPlanned)); err != nil {
 		return err
 	}
 
@@ -211,7 +215,7 @@ func buildReport(target *types.Filesystem, sample *types.SampleResult, strategy 
 	}
 }
 
-func saveReport(reportData *types.Report, outputDir string) error {
+func saveReport(reportData *types.Report, outputDir string, successCount, totalCount int) error {
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
@@ -234,6 +238,6 @@ func saveReport(reportData *types.Report, outputDir string) error {
 		return fmt.Errorf("failed to write Markdown report: %w", err)
 	}
 
-	prompt.DisplayCompletion(reportPath)
+	prompt.DisplayCompletion(reportPath, successCount, totalCount)
 	return nil
 }

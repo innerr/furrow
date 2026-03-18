@@ -109,9 +109,13 @@ func DisplayTestProgress(current, total int, name string, metrics *types.TestMet
 	fmt.Println()
 }
 
-func DisplayCompletion(reportPath string) {
+func DisplayCompletion(reportPath string, successCount, totalCount int) {
 	fmt.Println()
-	fmt.Println("  ✓ All tests completed successfully")
+	if successCount == totalCount {
+		fmt.Println("  ✓ All tests completed successfully")
+	} else {
+		fmt.Printf("  %d/%d tests completed successfully\n", successCount, totalCount)
+	}
 	fmt.Println()
 	fmt.Println("  Reports generated:")
 	fmt.Printf("    %s.md\n", reportPath)

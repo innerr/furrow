@@ -137,17 +137,14 @@ if newFileSize != testFileSize {
 }
 ```
 
-**Trade-off**:
-- Option A is simpler and keeps the current execution model intact
-- Option B uses measured performance, but it changes the file under test after sampling and adds more state transitions
-
-**Recommendation**: Option A is preferred for this codebase. Option B is only justified if measured-class sizing is considered mandatory.
-
 **Fix Applied**: 
 - Date: 2026-03-19
 - Commit: Pending PR
-- Change: Added `estimatedDiskClass := analyzer.ClassifyFromDiskType(targetFS.DiskType)` before CalculateTestFileSize call
-- Files: `cmd/run.go:78-79`
+- Change:
+  1. Added early return if `len(results) == 0`
+  2. Modified `saveReport()` to accept `successCount, totalCount`
+  3. Modified `DisplayCompletion()` to show success count
+- Files: `cmd/run.go:156-158,162,218,241`, `internal/prompt/prompt.go:112-121`
 
 ---
 
