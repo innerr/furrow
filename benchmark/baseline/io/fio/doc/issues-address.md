@@ -71,6 +71,12 @@ metrics.BandwidthMBps = float64(job.Read.Bandwidth) / 1024  // bw is in KB/s
 
 **Verification**: Run a simple fio test, the reported MB/s should match fio's own output.
 
+**Fix Applied**: 
+- Date: 2026-03-19
+- Commit: Pending PR
+- Change: Replaced `BandwidthAgg` with `Bandwidth` in 4 locations (lines 143, 148, 153, 158)
+- Files: `internal/fio/parser.go:143,148,153,158`
+
 ---
 
 ## P1 - High Priority
