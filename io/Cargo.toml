@@ -3,12 +3,20 @@ name = "furrow-io"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+compression = ["lz4_flex"]
+encryption = ["aes-gcm", "rand"]
+
 [dependencies]
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "fs", "io-util", "sync", "time", "macros"] }
 thiserror = "1"
 crc32fast = "1"
 bytes = "1"
 bitflags = "2"
+lz4_flex = { version = "0.11", optional = true }
+aes-gcm = { version = "0.10", optional = true }
+rand = { version = "0.8", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio-uring = "0.5"

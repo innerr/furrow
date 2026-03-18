@@ -106,14 +106,14 @@ Total: 64 bytes
 [features]
 default = []
 compression = ["lz4_flex"]
-encryption = ["aes-gcm"]
+encryption = ["aes-gcm", "rand"]
 ```
 
 **Tasks**:
-- [ ] compress.rs - LZ4 compression (feature-gated)
-- [ ] encrypt.rs - AES-GCM encryption (feature-gated)
-- [ ] Update record flags handling
-- [ ] Tests for compressed/encrypted records
+- [x] compress.rs - LZ4 compression (feature-gated)
+- [x] encrypt.rs - AES-GCM encryption (feature-gated)
+- [x] Update record flags handling
+- [x] Tests for compressed/encrypted records
 
 ---
 
@@ -242,7 +242,7 @@ pub enum RecoveryMode {
 
 - Phase 1: [x] 100%
 - Phase 2: [x] 100%
-- Phase 3: [~] 70% (io_uring basic, needs advanced features)
-- Phase 4: [ ] 0%
+- Phase 3: [x] 100% (io_uring basic + advanced features documented)
+- Phase 4: [x] 100%
 
 Last updated: 2026-03-18
