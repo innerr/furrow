@@ -10,8 +10,8 @@
 ### 1. Linux Backend Is Syntactically Broken
 
 **Locations**:
-- `src/wal/writer_uring.rs:137-195`
-- `src/wal/writer_uring.rs:330-357`
+- `src/writer_uring.rs:137-195`
+- `src/writer_uring.rs:330-357`
 
 **Root Cause Analysis**:
 The `writer_uring.rs` file contains multiple severe syntax errors that prevent compilation:
@@ -30,42 +30,42 @@ This method is syntactically irreparable and conceptually flawed (it tries to ha
 **Step 2: Implement a proper `write()` method**
 ```rust
 pub async fn write(&self, data: &[u8]) -> Result<u64> {
-    // 1. First allocate LSN atomically
-    let lsn = {
-        let inner = self.inner.lock().await;
-        inner.next_lsn.fetch_add(1, Ordering::Relaxed)
-    };
-    
-    // 2. Create record with the allocated LSN
-    let record = Record::new(lsn, data.to_vec());
-    let encoded = record.encode()?;
-    let record_size = encoded.len() as u64;
-    
-    // 3. Now acquire lock and write
+    // Reject oversized payloads before consuming an LSN.
+    let estimated_size = HEADER_SIZE as u64 + data.len() as u64;
+    if estimated_size as usize > MAX_RECORD_SIZE {
+        return Err(Error::RecordTooLarge {
+            size: estimated_size as usize,
+            max: MAX_RECORD_SIZE,
+        });
+    }
+
+    // Keep LSN allocation and append-order decisions in one critical section.
     let mut inner = self.inner.lock().await;
-    
-    // Check rotation needs
-    let size_exceeded = inner.next_offset + record_size > inner.max_file_size;
+
+    let size_exceeded = inner.next_offset + estimated_size > inner.max_file_size;
     let time_exceeded = inner
         .max_file_age
         .map(|age| inner.file_created_at.elapsed() >= age)
         .unwrap_or(false);
-    
+
     if size_exceeded || time_exceeded {
         self.rotate_file(&mut inner).await?;
     }
-    
-    // Write the record
+
+    let lsn = inner.next_lsn.fetch_add(1, Ordering::Relaxed);
+    let record = Record::new(lsn, data.to_vec());
+    let encoded = record.encode()?;
+    let record_size = encoded.len() as u64;
+
     let offset = inner.next_offset;
     let file = inner.current_file.as_ref().ok_or(Error::Closed)?;
     let (res, file) = file.write_all_at(&encoded, offset).await;
     res?;
     inner.current_file = Some(file);
-    
+
     inner.next_offset += record_size;
     inner.bytes_since_sync += record_size;
-    
-    // Handle sync based on mode
+
     let should_sync = match &inner.sync_mode {
         SyncMode::Always => true,
         SyncMode::Batch { bytes, time } => {
@@ -73,7 +73,7 @@ pub async fn write(&self, data: &[u8]) -> Result<u64> {
         }
         SyncMode::Never => false,
     };
-    
+
     if should_sync {
         let file = inner.current_file.as_ref().ok_or(Error::Closed)?;
         let (res, file) = file.sync_all().await;
@@ -82,10 +82,15 @@ pub async fn write(&self, data: &[u8]) -> Result<u64> {
         inner.bytes_since_sync = 0;
         inner.last_sync = Instant::now();
     }
-    
+
     Ok(lsn)
 }
 ```
+
+**Why the lock scope matters**:
+- The current implementation is already serialized on `inner`.
+- If LSN allocation happens before the write lock is reacquired, persisted record order can diverge from LSN order.
+- Recovery currently derives `next_lsn` from the last valid on-disk record, so out-of-order persisted LSNs can cause reuse or rollback after restart.
 
 **Step 3: Add Linux CI job**
 Create a GitHub Actions workflow or modify existing CI to build and test on Linux:
@@ -96,12 +101,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - run: cargo build --features io-uring
-      - run: cargo test --features io-uring
+      - run: cargo build
+      - run: cargo test
+      - run: cargo build --features uring-advanced
 ```
 
-**Step 4: Remove broken WalSync::write() stub at line 335-337**
-The current implementation calls `self.wal.write()` which doesn't exist. After implementing `Wal::write()`, this will work correctly.
+**Important**:
+- The io_uring writer is selected by `target_os = "linux"`, not by a Cargo feature.
+- `io-uring` is not a declared feature in `Cargo.toml`; using it in CI would fail immediately.
+
+**Step 4: Re-check `WalSync::write()` after restoring `Wal::write()`**
+The sync wrapper can keep delegating to `self.wal.write()` once the async writer compiles again; no separate design change is needed beyond making the main write path valid.
 
 **Validation**:
 - Run `cargo build` on Linux - must compile without errors
@@ -284,62 +294,61 @@ The code iterates over files from disk without checking if any file is currently
 
 **Fix Plan**:
 
-**Option A (Recommended): Exclude the current file from truncation**
+**Recommended approach: coordinate issue #4 and issue #6 in one implementation**
 
 ```rust
 pub async fn truncate(&self, lsn: u64) -> Result<()> {
-    // Get current file info while holding the lock briefly
-    let current_seq = {
-        let inner = self.inner.lock().await;
+    // Hold the lock long enough to make the active-file decision once.
+    let active_seq = {
+        let mut inner = self.inner.lock().await;
+
+        let active_seq = inner.current_file.as_ref().map(|f| f.header.seq);
+        let active_last_lsn = if let Some(current_file) = inner.current_file.as_mut() {
+            recover_last_lsn(current_file).await?
+        } else {
+            None
+        };
+
+        // If the active file is also fully truncatable, rotate first so that
+        // the old active file becomes deletable without unlinking an open inode.
+        if active_last_lsn.is_some_and(|last| last <= lsn) {
+            self.rotate_file(&mut inner).await?;
+        }
+
         inner.current_file.as_ref().map(|f| f.header.seq)
     };
-    
+
     let files = wal_file::list_wal_files(&self.dir).await?;
-    
+
     for (seq, path) in &files {
-        // Skip the currently active file
-        if let Some(curr_seq) = current_seq {
-            if *seq == curr_seq {
-                continue;
-            }
+        if active_seq.is_some_and(|curr_seq| *seq == curr_seq) {
+            continue;
         }
-        
+
         let mut wal_file = WalFile::open(path.clone()).await?;
         if let Some(last) = recover_last_lsn(&mut wal_file).await? {
-            if last <= lsn {  // Note: also fixing issue #6 here
+            if last <= lsn {
                 drop(wal_file);
                 fs::remove_file(path).await?;
             }
         }
     }
-    
+
     Ok(())
 }
 ```
 
-**Option B: Rotate before truncating**
-This ensures the current file is closed and synced before any truncation:
-```rust
-pub async fn truncate(&self, lsn: u64) -> Result<()> {
-    // Force rotation to close current file
-    self.rotate().await?;
-    
-    // Now safe to truncate
-    let files = wal_file::list_wal_files(&self.dir).await?;
-    // ... rest of truncation logic
-}
-```
-
-**Why Option A is better**:
-- More efficient - no forced rotation
-- Preserves current file's data
-- Aligns with user expectation that truncate doesn't affect uncommitted data
+**Why this is better than “always skip the active file”**:
+- It still prevents unlinking an open file.
+- It preserves the documented `truncate(lsn)` semantics for `LSN <= lsn`.
+- It avoids the long-term leak where the active file can never be reclaimed even when all its records are already truncated.
 
 **For writer_uring.rs**: Apply the same fix, but note that `current_file` is `tokio_uring::fs::File`, not `WalFile`, so we need to track `current_seq` separately (which already exists as a field in `Inner`).
 
 **Validation**:
-- Test: write to WAL, call truncate with high LSN, verify current file still exists
-- Test: verify writes after truncate are persisted and recoverable
+- Test: truncate a non-active old file and verify it is removed.
+- Test: truncate the active file's full LSN range and verify the implementation rotates first, then deletes the old file.
+- Test: verify writes after `truncate()` are persisted and recoverable from the new active file.
 
 ---
 
@@ -356,8 +365,8 @@ pub async fn truncate(&self, lsn: u64) -> Result<()> {
 The recovery flow has two separate steps that don't communicate properly:
 
 1. `recover_last_lsn()` scans the file and returns the last valid LSN, but **not the offset**
-2. `open()` uses the **physical file size** as `start_offset`, not the last valid record's end offset
-3. `reader.rs` stops scanning on any corruption/truncation but doesn't report where it stopped
+2. Recovery trusts header structure and file length only; it does not validate record payload CRC
+3. `reader.rs` stops scanning on corruption/truncation, but `open()` does not repair the last file back to the last valid boundary
 
 **Scenario**:
 ```
@@ -366,13 +375,14 @@ File layout: [Header][Record1 (valid)][Record2 (partial write/corrupt)][...garba
              0       64               150                          500 (file size)
 
 Current behavior:
-- recover_last_lsn() returns LSN from Record1
-- start_offset = 500 (file size)
-- New writes go at offset 500
+- `recover_last_lsn()` returns LSN from Record1
+- The bad tail remains on disk
+- Readers stop at Record2 forever, so the last file stays permanently corrupted
 
 Problem:
-- Recovery stops at Record2 (corrupt)
-- Record3 at offset 500 is never reached during recovery
+- Recovery metadata is derived from partially trusted bytes
+- The corrupted tail is never physically removed, so every future reader hits the same stop point
+- If the implementation later resumes appending to the recovered file, it would append beyond an untrimmed corrupt tail
 ```
 
 **Impact**:
@@ -382,7 +392,7 @@ Problem:
 
 **Fix Plan**:
 
-**Step 1: Modify `recover_last_lsn()` to return both LSN and offset**
+**Step 1: Replace `recover_last_lsn()` with a recovery scan that returns both LSN and offset**
 
 In `writer_tokio.rs`:
 ```rust
@@ -413,8 +423,13 @@ async fn recover_info(wal_file: &mut WalFile) -> Result<RecoveryInfo> {
             break;
         }
 
-        // Optionally verify CRC here for strict mode
-        
+        let data = wal_file
+            .read_at(offset + HEADER_SIZE as u64, header.len as usize)
+            .await?;
+        if !verify_crc(&data, header.crc) {
+            break;
+        }
+
         last_lsn = Some(header.lsn);
         last_valid_offset = record_end;  // Track the end of the last valid record
         offset = record_end;
@@ -427,27 +442,27 @@ async fn recover_info(wal_file: &mut WalFile) -> Result<RecoveryInfo> {
 }
 ```
 
-**Step 2: Use recovery info in `open()`**
+**Step 2: Use recovery info in `open()` and physically repair the last file**
 ```rust
-let (start_lsn, start_offset, next_seq) = if let Some((max_seq, path)) = files.last() {
+let (start_lsn, next_seq) = if let Some((max_seq, path)) = files.last() {
     let mut wal_file = WalFile::open(path.clone()).await?;
     let info = recover_info(&mut wal_file).await?;
-    
-    // Truncate the file back to the last valid offset
+
     if info.last_valid_offset < wal_file.write_offset {
         wal_file.truncate(info.last_valid_offset).await?;
     }
-    
+
     let next_seq = max_seq + 1;
-    (
-        info.last_lsn.map_or(0, |lsn| lsn + 1),
-        info.last_valid_offset,
-        next_seq
-    )
+    (info.last_lsn.map_or(0, |lsn| lsn + 1), next_seq)
 } else {
-    (0, FILE_HEADER_SIZE, 0)
+    (0, 0)
 };
 ```
+
+**Important clarification**:
+- In the current implementation, `open()` always creates a fresh active WAL file via `ensure_active_file()`.
+- That means the immediate value of this fix is not “resume appending at `last_valid_offset`”; it is “repair the recovered last file so readers and future truncation operate on valid bytes only”.
+- If the implementation is later changed to keep appending to the recovered file, `last_valid_offset` must become the append offset used by the writer.
 
 **Step 3: Add `truncate()` method to `WalFile`**
 ```rust
@@ -470,6 +485,7 @@ The uring version needs similar changes, adapting for sync I/O and `tokio_uring:
 
 **Validation**:
 - Test: create file with valid record, append garbage, restart, verify file is truncated
+- Test: create file with valid header/length but corrupted payload CRC, restart, verify recovery truncates before that record
 - Test: verify new writes after restart are recoverable
 - Test: verify partial writes at crash boundary are handled correctly
 
@@ -528,17 +544,18 @@ async fn test_truncate_boundary() {
     wal.truncate(lsn).await.unwrap();
     wal.close().await.unwrap();
     
-    // File should be deleted
+    // The old file should be deleted. A fresh active file may still exist
+    // because `open()` creates one eagerly.
     let files: Vec<_> = std::fs::read_dir(dir.path())
         .unwrap()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_name().to_string_lossy().starts_with("wal."))
         .collect();
-    assert!(files.is_empty());
+    assert!(files.len() <= 1);
 }
 ```
 
-**Note**: This fix should be combined with issue #4 (exclude active file) in a single PR.
+**Note**: This fix should be combined with issue #4 in a single PR; otherwise the `<=` boundary change can reintroduce active-file deletion.
 
 ---
 
@@ -585,41 +602,7 @@ This silently hides corruption by filtering out all `Err` results before sorting
 
 **Fix Plan**:
 
-**Step 1: Store recovery_mode in Wal**
-
-In `writer_tokio.rs`:
-```rust
-#[derive(Debug)]
-struct Inner {
-    // ... existing fields ...
-    recovery_mode: RecoveryMode,  // Add this
-}
-
-impl Wal {
-    pub async fn open(config: WalConfig) -> Result<Self> {
-        // ... existing code ...
-        
-        let inner = Inner {
-            // ... existing fields ...
-            recovery_mode: config.recovery_mode,  // Store it
-        };
-        
-        // ... rest of open ...
-    }
-    
-    pub fn reader(&self) -> Result<crate::WalReader> {
-        let inner = self.inner.try_lock().ok();  // Non-blocking peek
-        let mode = inner.as_ref()
-            .map(|i| i.sync_mode.clone())  // Wait, we need recovery_mode
-            .unwrap_or(RecoveryMode::TolerateTailCorruption);
-        
-        // Better: store recovery_mode in Wal directly, not just Inner
-        crate::WalReader::with_recovery_mode(self.dir.clone(), self.recovery_mode)
-    }
-}
-```
-
-Actually, a cleaner approach is to add a field to `Wal`:
+**Step 1: Store `recovery_mode` on `Wal` itself**
 ```rust
 #[derive(Debug)]
 pub struct Wal {
@@ -633,48 +616,35 @@ pub fn reader(&self) -> Result<crate::WalReader> {
 }
 ```
 
-**Step 2: Fix `iter_ordered()` to preserve errors**
+This should live on `Wal`, not behind `inner`, because the value is immutable configuration rather than mutable writer state.
+
+**Step 2: Make `iter_ordered()` fail closed instead of mixing sorted data with hidden errors**
 ```rust
 pub fn iter_ordered(&self) -> impl Iterator<Item = Result<Record>> {
-    let mut records: Vec<Result<Record>> = self.iter().collect();  // Keep all results
-    
-    // Partition into Ok and Err
-    let (mut ok_records, errors): (Vec<_>, Vec<_>) = records.into_iter()
-        .partition(|r| r.is_ok());
-    
-    // Sort only the Ok records
-    ok_records.sort_by_key(|r| r.as_ref().unwrap().lsn);
-    
-    // Return errors first (or last, depending on preference)
-    // Option A: Errors first
-    errors.into_iter().chain(ok_records.into_iter())
-    
-    // Option B: Errors last (recommended - valid data first)
-    ok_records.into_iter().chain(errors.into_iter())
+    let mut records = Vec::new();
+
+    for item in self.iter() {
+        match item {
+            Ok(record) => records.push(record),
+            Err(err) => return std::iter::once(Err(err)).chain(std::iter::empty()),
+        }
+    }
+
+    records.sort_by_key(|r| r.lsn);
+    records.into_iter().map(Ok)
 }
 ```
 
-**Alternative approach**: Return errors inline but maintain order:
+**Alternative API (cleaner)**: change this method to `read_ordered() -> Result<Vec<Record>>`
 ```rust
-pub fn iter_ordered(&self) -> impl Iterator<Item = Result<Record>> {
-    // Collect all results with their original position info
-    let mut indexed: Vec<(usize, Result<Record>)> = self.iter()
-        .enumerate()
-        .collect();
-    
-    // Sort: Ok records by LSN, Err records at the end preserving order
-    indexed.sort_by(|a, b| {
-        match (&a.1, &b.1) {
-            (Ok(ra), Ok(rb)) => ra.lsn.cmp(&rb.lsn),
-            (Ok(_), Err(_)) => std::cmp::Ordering::Less,
-            (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
-            (Err(_), Err(_)) => std::cmp::Ordering::Equal,
-        }
-    });
-    
-    indexed.into_iter().map(|(_, r)| r)
+pub fn read_ordered(&self) -> Result<Vec<Record>> {
+    let mut records = self.iter().collect::<Result<Vec<_>>>()?;
+    records.sort_by_key(|r| r.lsn);
+    Ok(records)
 }
 ```
+
+Returning both sorted `Ok(...)` items and `Err(...)` items from one iterator is technically possible, but it produces ambiguous semantics for callers. For recovery code, surfacing the first error and stopping is safer.
 
 **Step 3: Apply to `writer_uring.rs`**
 Same changes needed in the uring backend.
