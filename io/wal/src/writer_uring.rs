@@ -24,10 +24,10 @@ use std::time::Instant;
 
 use tokio::sync::Mutex;
 
-use crate::wal::config::{SyncMode, WalConfig};
-use crate::wal::error::{Error, Result};
-use crate::wal::file::{self as wal_file, FILE_HEADER_SIZE};
-use crate::wal::record::{Record, RecordHeader, HEADER_SIZE};
+use crate::config::{SyncMode, WalConfig};
+use crate::error::{Error, Result};
+use crate::file::{self as wal_file, FILE_HEADER_SIZE};
+use crate::record::{Record, RecordHeader, HEADER_SIZE};
 
 #[derive(Debug)]
 pub struct Wal {
@@ -268,8 +268,8 @@ impl Wal {
         Ok(())
     }
 
-    pub fn reader(&self) -> Result<crate::wal::WalReader> {
-        crate::wal::WalReader::new(self.dir.clone())
+    pub fn reader(&self) -> Result<crate::WalReader> {
+        crate::WalReader::new(self.dir.clone())
     }
 
     pub async fn close(self) -> Result<()> {
@@ -349,7 +349,7 @@ impl WalSync {
         tokio_uring::start(async { self.wal.sync().await })
     }
 
-    pub fn reader(&self) -> Result<crate::wal::WalReader> {
+    pub fn reader(&self) -> Result<crate::WalReader> {
         self.wal.reader()
     }
 

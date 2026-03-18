@@ -3,7 +3,7 @@
 //! This module provides compression functionality using LZ4 algorithm.
 //! Only available when the `compression` feature is enabled.
 
-use crate::wal::error::{Error, Result};
+use crate::error::{Error, Result};
 
 #[cfg(feature = "compression")]
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};

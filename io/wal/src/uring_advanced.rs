@@ -9,7 +9,7 @@
 
 use std::os::unix::io::{AsRawFd, RawFd};
 
-use crate::wal::error::{Error, Result};
+use crate::error::{Error, Result};
 
 /// Maximum number of registered files.
 const MAX_REGISTERED_FILES: usize = 1;
@@ -205,7 +205,7 @@ mod tests {
 
         assert!(!batch.add()); // 1
         assert!(!batch.add()); // 2
-        assert!(batch.add());  // 3 - should submit
+        assert!(batch.add()); // 3 - should submit
 
         assert_eq!(batch.pending(), 3);
         batch.clear();

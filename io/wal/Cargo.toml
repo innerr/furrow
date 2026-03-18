@@ -1,5 +1,5 @@
 [package]
-name = "furrow-io"
+name = "furrow-io-wal"
 version = "0.1.0"
 edition = "2021"
 

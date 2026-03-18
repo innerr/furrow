@@ -180,8 +180,8 @@ impl Iterator for RecordIter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wal::config::{SyncMode, WalConfig};
-    use crate::wal::writer::Wal;
+    use crate::config::{SyncMode, WalConfig};
+    use crate::writer::Wal;
     use tempfile::tempdir;
 
     #[tokio::test]
