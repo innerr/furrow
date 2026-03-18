@@ -44,10 +44,6 @@ func GenerateStrategy(sample *types.SampleResult, diskClass types.DiskClass) *ty
 				strategy.SkipReasons["latency_write"] = "read/write IOPS within 15%"
 			}
 		}
-
-		if sample.FsyncIOPS > 10000 {
-			strategy.SkipReasons["fsync_deep"] = "fsync IOPS already excellent (> 10K)"
-		}
 	}
 
 	for _, test := range selection.Run {

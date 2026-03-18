@@ -908,6 +908,12 @@ is the only real fsync test today and is used by sampling, scoring, and report
 generation, so deleting it from the plan would change benchmark behavior rather
 than just fixing a bad skip-reason key.
 
+**Fix Applied**: 
+- Date: 2026-03-19
+- Commit: Pending PR
+- Change: Removed dead `fsync_deep` skip reason code
+- Files: `internal/analyzer/strategy.go:48-50`
+
 ---
 
 ### 16. Tool version is hardcoded in reports
