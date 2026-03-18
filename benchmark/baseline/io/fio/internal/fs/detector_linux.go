@@ -180,10 +180,26 @@ func (this *linuxDetector) getBaseDeviceName(devicePath string) string {
 	name := filepath.Base(devicePath)
 
 	if strings.HasPrefix(name, "nvme") {
-		parts := strings.SplitN(name, "n", 2)
-		if len(parts) > 0 {
-			return parts[0]
+		// NVMe format: nvme<controller>n<namespace>p<partition>
+		// Examples: nvme0n1p1 -> nvme0n1, nvme0n1 -> nvme0n1
+		idx := strings.LastIndex(name, "p")
+		if idx > 0 {
+			// Check if what follows "p" is a number (partition number)
+			partitionPart := name[idx+1:]
+			if len(partitionPart) > 0 {
+				allDigits := true
+				for _, c := range partitionPart {
+					if c < '0' || c > '9' {
+						allDigits = false
+						break
+					}
+				}
+				if allDigits {
+					return name[:idx]
+				}
+			}
 		}
+		return name
 	}
 
 	if strings.HasPrefix(name, "sd") || strings.HasPrefix(name, "hd") || strings.HasPrefix(name, "vd") {

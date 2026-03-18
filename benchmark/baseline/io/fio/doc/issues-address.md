@@ -140,11 +140,8 @@ if newFileSize != testFileSize {
 **Fix Applied**: 
 - Date: 2026-03-19
 - Commit: Pending PR
-- Change:
-  1. Added `io` import
-  2. Changed both `ReadString` calls to capture and handle errors
-  3. Return `fmt.Errorf("input closed")` for EOF, wrap other errors
-- Files: `internal/prompt/prompt.go:5,35-42,80-88`
+- Change: Replaced `strings.SplitN` with logic to find "p" and verify partition number, returning base device name
+- Files: `internal/fs/detector_linux.go:182-203`
 
 ---
 
