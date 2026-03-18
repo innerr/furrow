@@ -7,6 +7,26 @@ use super::error::{Error, Result};
 use super::file::{self, FILE_HEADER_SIZE};
 use super::record::{verify_crc, Record, RecordHeader, HEADER_SIZE};
 
+enum Either<L, R> {
+    Left(L),
+    Right(R),
+}
+
+impl<L, R> Iterator for Either<L, R>
+where
+    L: Iterator,
+    R: Iterator<Item = L::Item>,
+{
+    type Item = L::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Either::Left(l) => l.next(),
+            Either::Right(r) => r.next(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct WalReader {
     dir: PathBuf,
@@ -30,9 +50,25 @@ impl WalReader {
     }
 
     pub fn iter_ordered(&self) -> impl Iterator<Item = Result<Record>> {
-        let mut records: Vec<_> = self.iter().filter_map(|r| r.ok()).collect();
+        let mut records = Vec::new();
+
+        for item in self.iter() {
+            match item {
+                Ok(record) => records.push(record),
+                Err(err) => {
+                    return Either::Left(std::iter::once(Err(err)));
+                }
+            }
+        }
+
         records.sort_by_key(|r| r.lsn);
-        records.into_iter().map(Ok)
+        Either::Right(records.into_iter().map(Ok))
+    }
+
+    pub fn read_ordered(&self) -> Result<Vec<Record>> {
+        let mut records = self.iter().collect::<Result<Vec<_>>>()?;
+        records.sort_by_key(|r| r.lsn);
+        Ok(records)
     }
 }
 

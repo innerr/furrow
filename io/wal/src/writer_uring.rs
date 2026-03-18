@@ -24,7 +24,7 @@ use std::time::Instant;
 
 use tokio::sync::Mutex;
 
-use crate::config::{SyncMode, WalConfig};
+use crate::config::{RecoveryMode, SyncMode, WalConfig};
 use crate::error::{Error, Result};
 use crate::file::{self as wal_file, FILE_HEADER_SIZE};
 use crate::record::{Record, RecordHeader, HEADER_SIZE, MAX_RECORD_SIZE, verify_crc};
@@ -33,6 +33,7 @@ use crate::record::{Record, RecordHeader, HEADER_SIZE, MAX_RECORD_SIZE, verify_c
 pub struct Wal {
     dir: PathBuf,
     inner: Arc<Mutex<Inner>>,
+    recovery_mode: RecoveryMode,
 }
 
 #[derive(Debug)]
@@ -93,9 +94,12 @@ impl Wal {
             sync_mode: config.sync_mode,
         };
 
+        let recovery_mode = config.recovery_mode;
+
         let wal = Self {
             dir,
             inner: Arc::new(Mutex::new(inner)),
+            recovery_mode,
         };
 
         wal.ensure_active_file().await?;
@@ -304,7 +308,7 @@ impl Wal {
     }
 
     pub fn reader(&self) -> Result<crate::WalReader> {
-        crate::WalReader::new(self.dir.clone())
+        crate::WalReader::with_recovery_mode(self.dir.clone(), self.recovery_mode)
     }
 
     pub async fn close(self) -> Result<()> {
