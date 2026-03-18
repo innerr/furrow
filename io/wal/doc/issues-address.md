@@ -9,23 +9,36 @@
 
 ### Issue #1: Linux Backend Is Syntactically Broken - FIXED (2026-03-19)
 
-**Commit**: TBD
-
-**Actions Taken**:
-1. Deleted the broken `write_with_sync()` method (lines 135-195 in original)
-2. Implemented a proper `write()` method with the following improvements:
-   - Added `MAX_RECORD_SIZE` check before consuming LSN
-   - Kept LSN allocation and write in the same lock scope to ensure order consistency
-   - Properly handles all sync modes (Always, Batch, Never)
-   - Added `MAX_RECORD_SIZE` to imports from `record` module
-
-**Code Changes**:
 - `src/writer_uring.rs`: Replaced broken `write_with_sync()` with correct `write()` implementation
 - Import: Added `MAX_RECORD_SIZE` to `use crate::record::{...}`
 
 **Validation**:
 - ✅ `cargo build` compiles without errors
 - ✅ All 17 tests pass
+
+### Issue #2: Persisted Record Headers Store lsn = 0 - FIXED (2026-03-19)
+
+**Commit**: See PR #22
+
+**Actions Taken**:
+1. Added `MAX_RECORD_SIZE` to imports in `writer_tokio.rs`
+2. Rewrote `write()` method to allocate LSN **before** encoding the record
+3. Added pre-check for `MAX_RECORD_SIZE` to avoid wasting LSN on oversized records
+4. Added test `test_lsn_persisted_correctly` to verify LSN is correctly persisted after reopen
+
+**Code Changes**:
+- `src/writer_tokio.rs`:
+  - Import: Added `MAX_RECORD_SIZE`
+  - `write()`: Moved LSN allocation before `Record::new()` and `encode()`
+  - Added pre-check for `MAX_RECORD_SIZE`
+
+**Root Cause**: LSN was allocated **after** `Record::encode()`, so the encoded bytes always had `lsn = 0` in the header.
+
+**Fix**: Allocate LSN first, then create and encode the record with the correct LSN value.
+
+**Validation**:
+- ✅ `cargo build` compiles without errors
+- ✅ All 18 tests pass (including new `test_lsn_persisted_correctly`)
 
 ---
 

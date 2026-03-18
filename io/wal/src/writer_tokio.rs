@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use crate::config::{SyncMode, WalConfig};
 use crate::error::{Error, Result};
 use crate::file::{self as wal_file, WalFile, FILE_HEADER_SIZE};
-use crate::record::{Record, RecordHeader, HEADER_SIZE};
+use crate::record::{Record, RecordHeader, HEADER_SIZE, MAX_RECORD_SIZE};
 
 #[derive(Debug)]
 pub struct Wal {
@@ -91,37 +91,32 @@ impl Wal {
     }
 
     pub async fn write(&self, data: &[u8]) -> Result<u64> {
-        let record = Record::new(0, data.to_vec());
-        let encoded = record.encode()?;
-        let record_size = encoded.len() as u64;
+        let estimated_size = HEADER_SIZE + data.len();
+        if estimated_size > MAX_RECORD_SIZE {
+            return Err(Error::RecordTooLarge {
+                size: estimated_size,
+                max: MAX_RECORD_SIZE,
+            });
+        }
 
         let mut inner = self.inner.lock().await;
 
-        let size_exceeded = inner.next_offset + record_size > inner.max_file_size;
+        let size_exceeded = inner.next_offset + estimated_size as u64 > inner.max_file_size;
         let time_exceeded = inner
             .max_file_age
             .map(|age| inner.file_created_at.elapsed() >= age)
             .unwrap_or(false);
-        let needs_rotation = size_exceeded || time_exceeded;
 
-        if needs_rotation {
+        if size_exceeded || time_exceeded {
             self.rotate_file(&mut inner).await?;
         }
 
         let lsn = inner.next_lsn.fetch_add(1, Ordering::Relaxed);
-        let offset = inner.next_offset;
-        let sync_mode = inner.sync_mode.clone();
-        let bytes_threshold = if let SyncMode::Batch { bytes, .. } = &sync_mode {
-            Some(*bytes)
-        } else {
-            None
-        };
-        let time_threshold = if let SyncMode::Batch { time, .. } = &sync_mode {
-            Some(*time)
-        } else {
-            None
-        };
+        let record = Record::new(lsn, data.to_vec());
+        let encoded = record.encode()?;
+        let record_size = encoded.len() as u64;
 
+        let offset = inner.next_offset;
         inner
             .current_file
             .as_mut()
@@ -132,11 +127,10 @@ impl Wal {
         inner.next_offset += record_size;
         inner.bytes_since_sync += record_size;
 
-        let should_sync = match &sync_mode {
+        let should_sync = match &inner.sync_mode {
             SyncMode::Always => true,
-            SyncMode::Batch { .. } => {
-                inner.bytes_since_sync >= bytes_threshold.unwrap()
-                    || inner.last_sync.elapsed() >= time_threshold.unwrap()
+            SyncMode::Batch { bytes, time } => {
+                inner.bytes_since_sync >= *bytes || inner.last_sync.elapsed() >= *time
             }
             SyncMode::Never => false,
         };
@@ -390,5 +384,27 @@ mod tests {
             })
             .count();
         assert!(file_count >= 2);
+    }
+
+    #[tokio::test]
+    async fn test_lsn_persisted_correctly() {
+        let dir = tempdir().unwrap();
+        let config = WalConfig::new(dir.path()).sync_mode(SyncMode::Always);
+
+        let wal = Wal::open(config).await.unwrap();
+
+        let lsn1 = wal.write(b"first").await.unwrap();
+        let lsn2 = wal.write(b"second").await.unwrap();
+        let lsn3 = wal.write(b"third").await.unwrap();
+
+        wal.close().await.unwrap();
+
+        let reader = crate::WalReader::new(dir.path().to_path_buf()).unwrap();
+        let records: Vec<_> = reader.iter().collect();
+
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0].as_ref().unwrap().lsn, lsn1);
+        assert_eq!(records[1].as_ref().unwrap().lsn, lsn2);
+        assert_eq!(records[2].as_ref().unwrap().lsn, lsn3);
     }
 }
