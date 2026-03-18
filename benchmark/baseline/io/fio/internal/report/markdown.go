@@ -117,12 +117,12 @@ func writeLatency(sb *strings.Builder, report *types.Report) {
 	sb.WriteString("| Operation | Latency |\n")
 	sb.WriteString("|-----------|---------|\n")
 
-	if r, ok := report.Phase3Results["rand_read_4k_async_direct"]; ok {
+	if r, ok := report.Phase3Results["latency_read"]; ok {
 		if p99, ok := r.Metrics.LatencyPercentiles["p99"]; ok {
 			fmt.Fprintf(sb, "| Random Read 4K | %s |\n", FormatLatency(p99))
 		}
 	}
-	if r, ok := report.Phase3Results["rand_write_4k_async_direct"]; ok {
+	if r, ok := report.Phase3Results["latency_write"]; ok {
 		if p99, ok := r.Metrics.LatencyPercentiles["p99"]; ok {
 			fmt.Fprintf(sb, "| Random Write 4K | %s |\n", FormatLatency(p99))
 		}

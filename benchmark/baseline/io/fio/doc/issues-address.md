@@ -423,6 +423,15 @@ Apply same change to the `LatencyNS` and `LatencyMS` loops.
 **Recommendation**: Avoid float parsing/formatting here. String trimming preserves
 fio's declared precision and prevents `99.99` from being rounded to `100.0`.
 
+**Fix Applied**: 
+- Date: 2026-03-19
+- Commit: Pending PR
+- Change:
+  1. Modified `writeLatency()` to read from `latency_read` and `latency_write`
+  2. Added `normalizePercentileKey()` function using string trimming
+  3. Updated all three latency extraction branches to use the new function
+- Files: `internal/report/markdown.go:120,125`, `internal/fio/parser.go:186,195,204,231-237`
+
 ---
 
 ### 8. Redundancy detection skips the wrong tests

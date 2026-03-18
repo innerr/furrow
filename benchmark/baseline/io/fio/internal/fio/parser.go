@@ -183,7 +183,7 @@ func extractLatency(rw *FioRWStats, metrics *types.TestMetrics) {
 		metrics.LatencyMean = rw.LatencyUS.Mean
 		metrics.LatencyStddev = rw.LatencyUS.StdDev
 		for k, v := range rw.LatencyUS.Pct {
-			key := "p" + strings.ReplaceAll(k, ".", "_")
+			key := normalizePercentileKey(k)
 			metrics.LatencyPercentiles[key] = v
 		}
 	} else if rw.LatencyNS.N > 0 {
@@ -192,7 +192,7 @@ func extractLatency(rw *FioRWStats, metrics *types.TestMetrics) {
 		metrics.LatencyMean = rw.LatencyNS.Mean / 1000
 		metrics.LatencyStddev = rw.LatencyNS.StdDev / 1000
 		for k, v := range rw.LatencyNS.Pct {
-			key := "p" + strings.ReplaceAll(k, ".", "_")
+			key := normalizePercentileKey(k)
 			metrics.LatencyPercentiles[key] = v / 1000
 		}
 	} else if rw.LatencyMS.N > 0 {
@@ -201,7 +201,7 @@ func extractLatency(rw *FioRWStats, metrics *types.TestMetrics) {
 		metrics.LatencyMean = rw.LatencyMS.Mean * 1000
 		metrics.LatencyStddev = rw.LatencyMS.StdDev * 1000
 		for k, v := range rw.LatencyMS.Pct {
-			key := "p" + strings.ReplaceAll(k, ".", "_")
+			key := normalizePercentileKey(k)
 			metrics.LatencyPercentiles[key] = v * 1000
 		}
 	} else {
@@ -226,4 +226,12 @@ func ParseFioVersion(output string) (string, []int) {
 		return "fio-" + version, numeric
 	}
 	return output, nil
+}
+
+func normalizePercentileKey(k string) string {
+	trimmed := strings.TrimRight(strings.TrimRight(k, "0"), ".")
+	if trimmed == "" {
+		return "p" + k
+	}
+	return "p" + trimmed
 }
