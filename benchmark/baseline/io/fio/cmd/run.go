@@ -92,6 +92,7 @@ func runBenchmark() error {
 	}
 
 	sampleResult.DiskClass = analyzer.Classify(sampleResult)
+	targetFS.DiskClass = sampleResult.DiskClass
 	prompt.DisplaySamplingResults(sampleResult)
 
 	if runQuick {
@@ -152,7 +153,7 @@ func runBenchmark() error {
 		rawLogs[testName] = result.RawLog
 	}
 
-	reportData := buildReport(targetFS, sampleResult, strategy, results, rawLogs, runner, collector)
+	reportData := buildReport(targetFS, sampleResult, strategy, results, rawLogs, runner, collector, testFileSize, testFile)
 
 	if err := saveReport(reportData, runOutput); err != nil {
 		return err
@@ -163,7 +164,7 @@ func runBenchmark() error {
 
 func buildReport(target *types.Filesystem, sample *types.SampleResult, strategy *types.TestStrategy,
 	results map[string]types.TestConfigResult, rawLogs map[string]string,
-	runner *fio.Runner, collector metadata.Collector) *types.Report {
+	runner *fio.Runner, collector metadata.Collector, testFileSize uint64, testFilePath string) *types.Report {
 
 	hostInfo, _ := collector.CollectHostInfo()
 	envInfo, _ := collector.CollectEnvironment()
@@ -188,8 +189,8 @@ func buildReport(target *types.Filesystem, sample *types.SampleResult, strategy 
 			Environment: *envInfo,
 			Test: types.TestInfo{
 				Mode:              "adaptive",
-				TestFileSizeBytes: 0,
-				TestFilePath:      "",
+				TestFileSizeBytes: testFileSize,
+				TestFilePath:      testFilePath,
 				IODepth:           strategy.IODepth,
 				NumJobs:           strategy.NumJobs,
 				TestsRun:          len(results),

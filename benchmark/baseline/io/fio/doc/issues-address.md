@@ -283,6 +283,15 @@ reportData := buildReport(targetFS, sampleResult, strategy, results, rawLogs, ru
 2. Pass `testFileSize` and `testFile` to `buildReport()`
 3. Populate `TestFileSizeBytes` and `TestFilePath` in the report
 
+**Fix Applied**: 
+- Date: 2026-03-19
+- Commit: Pending PR
+- Change: 
+  1. Added `targetFS.DiskClass = sampleResult.DiskClass` after classification
+  2. Added `testFileSize` and `testFilePath` parameters to `buildReport()`
+  3. Populated `TestFileSizeBytes` and `TestFilePath` in report metadata
+- Files: `cmd/run.go:95,156,166,191-192`
+
 ---
 
 ### 6. Deep-test failures still produce a "successful" report
