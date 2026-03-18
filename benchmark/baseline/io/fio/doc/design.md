@@ -57,7 +57,6 @@ Skip tests when read/write performance is similar:
 
 - Bandwidth difference < 10% → skip separate write bandwidth tests
 - IOPS difference < 15% → skip separate write IOPS tests
-- fsync > 10K IOPS → skip fsync deep test
 
 ---
 
@@ -158,7 +157,7 @@ fio-bench list         # List filesystems
     ✗ Sync sequential (async covers it)
     ✗ Buffered mode (direct more representative)
   
-  [P]roceed  [C]ustomize  [Q]uit: P
+  [P]roceed  [Q]uit: P
 
 [Step 4/4] Running Tests...
   Reports: ./fio-reports/20240318_100000_server01_nvme0n1p1.{md,json}
