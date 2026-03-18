@@ -178,6 +178,40 @@
 - ✅ `cargo build` compiles without errors
 - ✅ All 18 tests pass
 
+### Issue #8: File Creation and Rotation Miss Directory fsync - FIXED (2026-03-19)
+
+**Commit**: TBD
+
+**Actions Taken**:
+1. Added `sync_dir()` helper function in `file.rs` for tokio backend
+2. Called `sync_dir()` after file sync in `WalFile::create()`
+3. Added `sync_dir()` helper function in `writer_uring.rs` for uring backend
+4. Called `sync_dir()` after file sync in `ensure_active_file()` and `rotate_file()`
+
+**Root Cause**: After creating a new WAL file and syncing its contents, the directory entry itself was not synced. A crash could lose the directory entry even though file contents were durable.
+
+**Fix**: 
+1. Open the parent directory read-only
+2. Call `sync_all()` on the directory fd
+3. Only on Unix (directory metadata on Windows is updated automatically)
+
+**Code Changes**:
+- `src/file.rs`:
+  - Added `sync_dir()` async function
+  - Called in `WalFile::create()` after `file.sync_all()`
+- `src/writer_uring.rs`:
+  - Added `sync_dir()` async function using tokio_uring
+  - Called in `ensure_active_file()` after file sync
+  - Called in `rotate_file()` after file sync
+
+**Note on performance**: Directory sync adds one extra I/O per file creation/rotation, but this is acceptable because:
+- Rotation is infrequent (controlled by size/time thresholds)
+- Durability is more important than performance for WAL
+
+**Validation**:
+- ✅ `cargo build` compiles without errors
+- ✅ All 18 tests pass
+
 ---
 
 ## Critical (P0) - Must Fix Before Production

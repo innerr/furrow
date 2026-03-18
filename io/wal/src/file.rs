@@ -105,6 +105,25 @@ pub fn parse_filename(name: &str) -> Option<u32> {
     seq_str.parse().ok()
 }
 
+async fn sync_dir(dir: &Path) -> Result<()> {
+    let dir_file = fs::OpenOptions::new()
+        .read(true)
+        .open(dir)
+        .await?;
+
+    #[cfg(unix)]
+    {
+        dir_file.sync_all().await?;
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = dir_file;
+    }
+
+    Ok(())
+}
+
 pub async fn list_wal_files(dir: &Path) -> Result<Vec<(u32, PathBuf)>> {
     let mut entries = fs::read_dir(dir).await?;
     let mut files = Vec::new();
@@ -162,6 +181,8 @@ impl WalFile {
         let header_bytes = header.encode();
         file.write_all(&header_bytes).await?;
         file.sync_all().await?;
+
+        sync_dir(dir).await?;
 
         Ok(Self {
             file,
