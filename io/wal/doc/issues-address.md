@@ -40,6 +40,26 @@
 - ✅ `cargo build` compiles without errors
 - ✅ All 18 tests pass (including new `test_lsn_persisted_correctly`)
 
+### Issue #3: Recovery Resets next_seq to Zero - FIXED (2026-03-19)
+
+**Commit**: TBD
+
+**Actions Taken**:
+1. Fixed `writer_tokio.rs`: Use `max_seq + 1` instead of hardcoded `0` for `next_seq`
+2. Fixed `writer_uring.rs`: Same fix applied
+
+**Code Changes**:
+- `src/writer_tokio.rs:45-52`: Changed pattern from `(_, path)` to `(max_seq, path)` and use `max_seq + 1`
+- `src/writer_uring.rs:62-72`: Same change
+
+**Root Cause**: The sequence number from the recovered file was discarded. Pattern matched `(u32, PathBuf)` but used `_` for seq, then hardcoded `next_seq = 0`.
+
+**Fix**: Bind `max_seq` and use `max_seq + 1` as `next_seq` to continue the sequence correctly.
+
+**Validation**:
+- ✅ `cargo build` compiles without errors
+- ✅ All 18 tests pass
+
 ---
 
 ## Critical (P0) - Must Fix Before Production

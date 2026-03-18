@@ -42,11 +42,15 @@ impl Wal {
 
         let files = wal_file::list_wal_files(&dir).await?;
 
-        let (start_lsn, start_offset, next_seq) = if let Some((_, path)) = files.last() {
+        let (start_lsn, start_offset, next_seq) = if let Some((max_seq, path)) = files.last() {
             let mut wal_file = WalFile::open(path.clone()).await?;
             let file_size = wal_file.write_offset;
             let last_lsn = recover_last_lsn(&mut wal_file).await?;
-            (last_lsn.map_or(0, |lsn| lsn + 1), file_size, 0)
+            (
+                last_lsn.map_or(0, |lsn| lsn + 1),
+                file_size,
+                max_seq + 1,
+            )
         } else {
             (0, FILE_HEADER_SIZE, 0)
         };

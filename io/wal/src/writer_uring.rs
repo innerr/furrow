@@ -59,14 +59,18 @@ impl Wal {
         tokio::fs::create_dir_all(&dir).await?;
 
         let files = wal_file::list_wal_files_sync(&dir)?;
-        let (start_lsn, start_offset, next_seq) = if let Some((_, path)) = files.last() {
+        let (start_lsn, start_offset, next_seq) = if let Some((max_seq, path)) = files.last() {
             let file_size = get_file_size(path)?;
             let file = tokio_uring::fs::OpenOptions::new()
                 .read(true)
                 .open(path)
                 .await?;
             let last_lsn = recover_last_lsn(file, file_size).await?;
-            (last_lsn.map_or(0, |lsn| lsn + 1), file_size, 0)
+            (
+                last_lsn.map_or(0, |lsn| lsn + 1),
+                file_size,
+                max_seq + 1,
+            )
         } else {
             (0, FILE_HEADER_SIZE, 0)
         };
