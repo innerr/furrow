@@ -186,7 +186,7 @@ func buildReport(target *types.Filesystem, sample *types.SampleResult, strategy 
 		Metadata: types.ReportMetadata{
 			ReportID:    reportID,
 			GeneratedAt: now,
-			ToolVersion: "1.0.0",
+			ToolVersion: Version,
 			Host:        *hostInfo,
 			Target:      *target,
 			Fio:         *fioInfo,

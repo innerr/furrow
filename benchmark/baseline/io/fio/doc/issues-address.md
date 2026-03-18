@@ -970,6 +970,14 @@ build:
 **Note**: If you prefer `main.Version`, then the variables must live in the
 root `main` package instead. The package path and the `-X` target must match.
 
+**Fix Applied**: 
+- Date: 2026-03-19
+- Commit: Pending PR
+- Change:
+  1. Created `cmd/version.go` with Version, GitCommit, BuildDate variables
+  2. Modified `cmd/run.go` to use `Version` variable instead of hardcoded "1.0.0"
+- Files: `cmd/version.go`, `cmd/run.go:189`
+
 ---
 
 ## Summary
