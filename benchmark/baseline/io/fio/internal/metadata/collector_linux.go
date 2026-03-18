@@ -139,9 +139,11 @@ func (this *linuxCollector) getCPUInfo() (string, int) {
 	defer file.Close()
 
 	var model string
-	physicalIDs := make(map[string]bool)
+	coreMap := make(map[string]bool)
 
 	scanner := bufio.NewScanner(file)
+	var currentPhysicalID, currentCoreID string
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "model name") {
@@ -153,12 +155,20 @@ func (this *linuxCollector) getCPUInfo() (string, int) {
 		if strings.HasPrefix(line, "physical id") {
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) == 2 {
-				physicalIDs[strings.TrimSpace(parts[1])] = true
+				currentPhysicalID = strings.TrimSpace(parts[1])
+			}
+		}
+		if strings.HasPrefix(line, "core id") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				currentCoreID = strings.TrimSpace(parts[1])
+				key := currentPhysicalID + ":" + currentCoreID
+				coreMap[key] = true
 			}
 		}
 	}
 
-	physicalCores := len(physicalIDs)
+	physicalCores := len(coreMap)
 	if physicalCores == 0 {
 		physicalCores = runtime.NumCPU()
 	}
