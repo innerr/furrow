@@ -39,10 +39,12 @@ func NewRunner() (*Runner, error) {
 }
 
 func (this *Runner) GetFioInfo() *types.FioInfo {
+	_, versionNum := ParseFioVersion(this.version)
 	return &types.FioInfo{
-		Version:      this.version,
-		Path:         this.fioPath,
-		Capabilities: this.getCapabilities(),
+		Version:        this.version,
+		VersionNumeric: versionNum,
+		Path:           this.fioPath,
+		Capabilities:   this.getCapabilities(),
 	}
 }
 

@@ -140,11 +140,8 @@ if newFileSize != testFileSize {
 **Fix Applied**: 
 - Date: 2026-03-19
 - Commit: Pending PR
-- Change:
-  1. Replaced `syscall.Statfs` with `vm_stat` command to get actual free memory
-  2. Parse page size from vm_stat header for accurate calculation
-  3. Fixed `parseSize()` to check unit before trimming suffix
-- Files: `internal/metadata/collector_darwin.go:6,145-168,190-197`
+- Change: Call `ParseFioVersion()` and populate `VersionNumeric` field in `GetFioInfo()`
+- Files: `internal/fio/runner.go:42-48`
 
 ---
 
