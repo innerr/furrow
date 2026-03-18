@@ -30,21 +30,17 @@ func GenerateStrategy(sample *types.SampleResult, diskClass types.DiskClass) *ty
 		if sample.SeqReadBWMBps > 0 && sample.SeqWriteBWMBps > 0 {
 			bwDiff := abs(int(sample.SeqReadBWMBps) - int(sample.SeqWriteBWMBps))
 			if bwDiff < int(float64(sample.SeqReadBWMBps)*0.1) {
-				delete(testsToRun, "seq_write_sync_direct")
-				delete(testsToRun, "seq_write_buffered")
-				strategy.SkipReasons["seq_write_sync_direct"] = "read/write bandwidth within 10%"
-				strategy.SkipReasons["seq_write_buffered"] = "read/write bandwidth within 10%"
+				delete(testsToRun, "seq_write_async_direct")
+				strategy.SkipReasons["seq_write_async_direct"] = "read/write bandwidth within 10%"
 			}
 		}
 
 		if sample.RandReadIOPS > 0 && sample.RandWriteIOPS > 0 {
 			iopsDiff := abs(int(sample.RandReadIOPS) - int(sample.RandWriteIOPS))
 			if iopsDiff < int(float64(sample.RandReadIOPS)*0.15) {
-				delete(testsToRun, "rand_write_4k_sync_direct")
-				delete(testsToRun, "rand_write_4k_buffered")
+				delete(testsToRun, "rand_write_4k_async_direct")
 				delete(testsToRun, "latency_write")
-				strategy.SkipReasons["rand_write_4k_sync_direct"] = "read/write IOPS within 15%"
-				strategy.SkipReasons["rand_write_4k_buffered"] = "read/write IOPS within 15%"
+				strategy.SkipReasons["rand_write_4k_async_direct"] = "read/write IOPS within 15%"
 				strategy.SkipReasons["latency_write"] = "read/write IOPS within 15%"
 			}
 		}

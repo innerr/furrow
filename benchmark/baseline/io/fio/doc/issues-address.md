@@ -485,6 +485,12 @@ if sample != nil {
 
 **Rationale**: When read and write performance are similar, the async write test provides redundant information. Keeping sync/buffered tests still has value for understanding different I/O patterns.
 
+**Fix Applied**: 
+- Date: 2026-03-19
+- Commit: Pending PR
+- Change: Replaced `seq_write_sync_direct`/`seq_write_buffered` with `seq_write_async_direct`, replaced `rand_write_4k_sync_direct`/`rand_write_4k_buffered` with `rand_write_4k_async_direct`
+- Files: `internal/analyzer/strategy.go:33-48`
+
 ---
 
 ### 9. Interactive input ignores `ReadString` errors
