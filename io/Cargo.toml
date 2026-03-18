@@ -7,6 +7,7 @@ edition = "2021"
 default = []
 compression = ["lz4_flex"]
 encryption = ["aes-gcm", "rand"]
+uring-advanced = []
 
 [dependencies]
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "fs", "io-util", "sync", "time", "macros"] }
@@ -20,6 +21,8 @@ rand = { version = "0.8", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio-uring = "0.5"
+io-uring = "0.6"
+libc = "0.2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }

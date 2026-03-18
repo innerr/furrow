@@ -14,6 +14,9 @@ mod compress;
 #[cfg(feature = "encryption")]
 mod encrypt;
 
+#[cfg(target_os = "linux")]
+mod uring_advanced;
+
 pub use config::{RecoveryMode, SyncMode, WalConfig};
 pub use error::{Error, Result};
 pub use reader::WalReader;
