@@ -125,6 +125,59 @@
 - ✅ `cargo build` compiles without errors
 - ✅ All 18 tests pass
 
+### Issue #6: truncate(lsn) Uses Wrong Boundary Condition - FIXED (2026-03-19)
+
+**Commit**: Merged with Issue #5 (PR #24)
+
+**Actions Taken**: Changed `<` to `<=` in truncate() condition
+
+**Root Cause**: The condition used `<` but design says `truncate(lsn)` should discard records with `LSN <= lsn`.
+
+**Fix**: Changed condition from `if last < lsn` to `if last <= lsn` in both backends.
+
+**Note**: This was fixed as part of Issue #5 since the same code was being modified.
+
+**Validation**:
+- ✅ `cargo build` compiles without errors
+- ✅ All 18 tests pass
+
+### Issue #7: Recovery Mode Config Ignored; Ordered Iteration Drops Errors - FIXED (2026-03-19)
+
+**Commit**: TBD
+
+**Actions Taken**:
+1. Added `recovery_mode` field to `Wal` struct in both backends
+2. Modified `Wal::open()` to store `recovery_mode` from config
+3. Modified `Wal::reader()` to pass `recovery_mode` via `WalReader::with_recovery_mode()`
+4. Fixed `iter_ordered()` to fail fast on first error instead of silently dropping errors
+5. Added new `read_ordered() -> Result<Vec<Record>>` method for cleaner error handling
+
+**Root Cause**: 
+1. `WalConfig::recovery_mode` was stored but never used - `reader()` always called `WalReader::new()` which hardcoded `TolerateTailCorruption`
+2. `iter_ordered()` used `.filter_map(|r| r.ok())` which silently dropped all errors
+
+**Fix**:
+1. Store `recovery_mode` on `Wal` itself (immutable config, not in mutable `Inner`)
+2. Pass `recovery_mode` to `WalReader` via `with_recovery_mode()`
+3. `iter_ordered()` now returns first error immediately, stopping iteration
+4. Added `read_ordered()` as cleaner alternative that collects all records or returns first error
+
+**Code Changes**:
+- `src/writer_tokio.rs`:
+  - Import: Added `RecoveryMode`
+  - Struct: Added `recovery_mode: RecoveryMode` to `Wal`
+  - `open()`: Store `config.recovery_mode`
+  - `reader()`: Use `WalReader::with_recovery_mode()`
+- `src/writer_uring.rs`: Same changes
+- `src/reader.rs`:
+  - Added `Either` enum for iterator type unification
+  - Fixed `iter_ordered()` to fail fast on first error
+  - Added `read_ordered() -> Result<Vec<Record>>`
+
+**Validation**:
+- ✅ `cargo build` compiles without errors
+- ✅ All 18 tests pass
+
 ---
 
 ## Critical (P0) - Must Fix Before Production
