@@ -140,8 +140,8 @@ if newFileSize != testFileSize {
 **Fix Applied**: 
 - Date: 2026-03-19
 - Commit: Pending PR
-- Change: Call `ParseFioVersion()` and populate `VersionNumeric` field in `GetFioInfo()`
-- Files: `internal/fio/runner.go:42-48`
+- Change: Check score presence with `ok` before comparing values
+- Files: `internal/report/json.go:128-133`
 
 ---
 
