@@ -143,6 +143,12 @@ if newFileSize != testFileSize {
 
 **Recommendation**: Option A is preferred for this codebase. Option B is only justified if measured-class sizing is considered mandatory.
 
+**Fix Applied**: 
+- Date: 2026-03-19
+- Commit: Pending PR
+- Change: Added `estimatedDiskClass := analyzer.ClassifyFromDiskType(targetFS.DiskType)` before CalculateTestFileSize call
+- Files: `cmd/run.go:78-79`
+
 ---
 
 ### 4. Test file sizing violates the 25% free-space cap

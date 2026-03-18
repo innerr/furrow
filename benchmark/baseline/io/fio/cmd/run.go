@@ -75,7 +75,8 @@ func runBenchmark() error {
 		}
 	}
 
-	testFileSize := fio.CalculateTestFileSize(targetFS.TotalBytes, targetFS.FreeBytes, targetFS.DiskClass)
+	estimatedDiskClass := analyzer.ClassifyFromDiskType(targetFS.DiskType)
+	testFileSize := fio.CalculateTestFileSize(targetFS.TotalBytes, targetFS.FreeBytes, estimatedDiskClass)
 
 	testFile, err := runner.CreateTestFile(targetFS.Path, testFileSize)
 	if err != nil {
