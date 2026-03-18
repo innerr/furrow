@@ -97,6 +97,34 @@
 - ✅ `cargo build` compiles without errors
 - ✅ All 18 tests pass
 
+### Issue #4: truncate() Can Delete Active File - FIXED (2026-03-19)
+
+**Commit**: TBD
+
+**Actions Taken**:
+1. Modified `writer_tokio.rs::truncate()`:
+   - Get active file's seq and last_lsn
+   - If active file's last_lsn <= lsn, rotate first
+   - Skip the new active file in deletion loop
+2. Modified `writer_uring.rs::truncate()`:
+   - Same changes using `inner.current_seq` instead of reading header
+
+**Root Cause**: `truncate()` iterated over files from disk without checking if any was currently open for writing. On Unix, deleting an open file succeeds but the process can still write to the orphaned inode.
+
+**Fix**: 
+1. Check active file's last_lsn
+2. If active file should be fully truncated, rotate first
+3. Skip the new active file in the deletion loop
+4. Delete other files as before
+
+**Code Changes**:
+- `src/writer_tokio.rs:189-229`: Rewrote `truncate()` with active file handling
+- `src/writer_uring.rs:252-297`: Same changes using `current_seq` field
+
+**Validation**:
+- ✅ `cargo build` compiles without errors
+- ✅ All 18 tests pass
+
 ---
 
 ## Critical (P0) - Must Fix Before Production

@@ -187,9 +187,33 @@ impl Wal {
     }
 
     pub async fn truncate(&self, lsn: u64) -> Result<()> {
+        // Hold the lock long enough to make the active-file decision once.
+        let active_seq = {
+            let mut inner = self.inner.lock().await;
+
+            let active_last_lsn = if let Some(current_file) = inner.current_file.as_mut() {
+                let info = recover_info(current_file).await?;
+                info.last_lsn
+            } else {
+                None
+            };
+
+            // If the active file is also fully truncatable, rotate first so that
+            // the old active file becomes deletable without unlinking an open inode.
+            if active_last_lsn.is_some_and(|last| last <= lsn) {
+                self.rotate_file(&mut inner).await?;
+            }
+
+            inner.current_file.as_ref().map(|f| f.header.seq)
+        };
+
         let files = wal_file::list_wal_files(&self.dir).await?;
 
-        for (_, path) in &files {
+        for (seq, path) in &files {
+            if active_seq.is_some_and(|curr_seq| curr_seq == *seq) {
+                continue;
+            }
+
             let mut wal_file = WalFile::open(path.clone()).await?;
             let info = recover_info(&mut wal_file).await?;
             if let Some(last) = info.last_lsn {

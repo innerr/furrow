@@ -252,9 +252,41 @@ impl Wal {
     }
 
     pub async fn truncate(&self, lsn: u64) -> Result<()> {
+        // Hold the lock long enough to make the active-file decision once.
+        let active_seq = {
+            let mut inner = self.inner.lock().await;
+
+            let active_last_lsn = if let Some(_current_file) = inner.current_file.as_ref() {
+                // Need to read from the current file to get its last LSN
+                // For uring, we need to open the file path separately
+                let path = self.dir.join(wal_file::make_filename(inner.current_seq));
+                let file_size = get_file_size(&path)?;
+                let file = tokio_uring::fs::OpenOptions::new()
+                    .read(true)
+                    .open(&path)
+                    .await?;
+                let info = recover_info(file, file_size).await?;
+                info.last_lsn
+            } else {
+                None
+            };
+
+            // If the active file is also fully truncatable, rotate first so that
+            // the old active file becomes deletable without unlinking an open inode.
+            if active_last_lsn.is_some_and(|last| last <= lsn) {
+                self.rotate_file(&mut inner).await?;
+            }
+
+            inner.current_seq
+        };
+
         let files = wal_file::list_wal_files_sync(&self.dir)?;
 
-        for (_, path) in &files {
+        for (seq, path) in &files {
+            if *seq == active_seq {
+                continue;
+            }
+
             let file_size = get_file_size(path)?;
             let file = tokio_uring::fs::OpenOptions::new()
                 .read(true)
