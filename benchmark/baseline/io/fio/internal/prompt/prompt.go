@@ -3,6 +3,7 @@ package prompt
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -31,7 +32,13 @@ func SelectFilesystem(filesystems []types.Filesystem) (*types.Filesystem, error)
 	for {
 		fmt.Printf("  Select target [1-%d]: ", len(filesystems))
 		reader := bufio.NewReader(os.Stdin)
-		input, _ := reader.ReadString('\n')
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				return nil, fmt.Errorf("input closed")
+			}
+			return nil, fmt.Errorf("failed to read input: %w", err)
+		}
 		input = strings.TrimSpace(input)
 
 		idx, err := strconv.Atoi(input)
@@ -70,7 +77,13 @@ func ConfirmStrategy(strategy *types.TestStrategy) (string, error) {
 	fmt.Printf("  [P]roceed  [Q]uit: ")
 
 	reader := bufio.NewReader(os.Stdin)
-	input, _ := reader.ReadString('\n')
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		if err == io.EOF {
+			return "", fmt.Errorf("input closed")
+		}
+		return "", fmt.Errorf("failed to read input: %w", err)
+	}
 	input = strings.ToLower(strings.TrimSpace(input))
 
 	switch input {
