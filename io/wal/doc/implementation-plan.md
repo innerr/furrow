@@ -162,7 +162,8 @@ pub struct WalReader { /* ... */ }
 
 impl WalReader {
     pub fn iter(&self) -> impl Iterator<Item = Result<Record>>;
-    pub fn iter_ordered(&self) -> impl Iterator<Item = Result<Record>>;
+    pub fn iter_ordered(&self) -> impl Iterator<Item = Result<Record>>;  // fail-fast on error
+    pub fn read_ordered(&self) -> Result<Vec<Record>>;  // collect all or error
 }
 
 pub struct Record {
