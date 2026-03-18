@@ -26,7 +26,7 @@ impl TryFrom<u8> for RecordType {
             1 => Ok(RecordType::First),
             2 => Ok(RecordType::Middle),
             3 => Ok(RecordType::Last),
-            _ => Err(Error::InvalidRecord("invalid record type")),
+            _ => Err(Error::InvalidRecord("invalid record type".into())),
         }
     }
 }
@@ -53,7 +53,7 @@ pub struct RecordHeader {
 impl RecordHeader {
     pub fn decode(buf: &[u8]) -> Result<Self> {
         if buf.len() < HEADER_SIZE {
-            return Err(Error::InvalidRecord("header too short"));
+            return Err(Error::InvalidRecord("header too short".into()));
         }
 
         let crc = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);

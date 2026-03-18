@@ -33,13 +33,13 @@ pub fn compress(_data: &[u8]) -> Result<Option<Vec<u8>>> {
 #[cfg(feature = "compression")]
 pub fn decompress(compressed: &[u8]) -> Result<Vec<u8>> {
     decompress_size_prepended(compressed)
-        .map_err(|e| Error::InvalidRecord(format!("decompression failed: {}", e).leak()))
+        .map_err(|e| Error::InvalidRecord(format!("decompression failed: {}", e)))
 }
 
 /// Decompresses data (stub when compression feature is disabled).
 #[cfg(not(feature = "compression"))]
 pub fn decompress(_compressed: &[u8]) -> Result<Vec<u8>> {
-    Err(Error::InvalidRecord("compression feature not enabled"))
+    Err(Error::InvalidRecord("compression feature not enabled".into()))
 }
 
 #[cfg(test)]

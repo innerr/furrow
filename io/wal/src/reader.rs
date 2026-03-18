@@ -155,7 +155,7 @@ impl Iterator for RecordIter {
             let mut header_buf = [0u8; HEADER_SIZE];
             if file.seek(SeekFrom::Start(self.current_offset)).is_err() {
                 if self.recovery_mode == RecoveryMode::Strict {
-                    return Some(Err(Error::InvalidRecord("seek failed")));
+                    return Some(Err(Error::InvalidRecord("seek failed".into())));
                 }
                 self.current_file = None;
                 continue;
@@ -163,7 +163,7 @@ impl Iterator for RecordIter {
 
             if file.read_exact(&mut header_buf).is_err() {
                 if self.recovery_mode == RecoveryMode::Strict {
-                    return Some(Err(Error::InvalidRecord("read header failed")));
+                    return Some(Err(Error::InvalidRecord("read header failed".into())));
                 }
                 self.current_file = None;
                 continue;
@@ -183,7 +183,7 @@ impl Iterator for RecordIter {
             let record_end = self.current_offset + HEADER_SIZE as u64 + header.len as u64;
             if record_end > self.current_file_size {
                 if self.recovery_mode == RecoveryMode::Strict {
-                    return Some(Err(Error::InvalidRecord("truncated record")));
+                    return Some(Err(Error::InvalidRecord("truncated record".into())));
                 }
                 self.current_file = None;
                 continue;
@@ -192,7 +192,7 @@ impl Iterator for RecordIter {
             let mut data = vec![0u8; header.len as usize];
             if file.read_exact(&mut data).is_err() {
                 if self.recovery_mode == RecoveryMode::Strict {
-                    return Some(Err(Error::InvalidRecord("read data failed")));
+                    return Some(Err(Error::InvalidRecord("read data failed".into())));
                 }
                 self.current_file = None;
                 continue;

@@ -62,17 +62,17 @@ impl FileHeader {
 
     pub fn decode(buf: &[u8]) -> Result<Self> {
         if buf.len() < FILE_HEADER_SIZE as usize {
-            return Err(Error::InvalidHeader("header too short"));
+            return Err(Error::InvalidHeader("header too short".into()));
         }
 
         let magic = [buf[0], buf[1], buf[2], buf[3]];
         if &magic != MAGIC {
-            return Err(Error::InvalidHeader("invalid magic"));
+            return Err(Error::InvalidHeader("invalid magic".into()));
         }
 
         let version = u16::from_le_bytes([buf[4], buf[5]]);
         if version != VERSION {
-            return Err(Error::InvalidHeader("unsupported version"));
+            return Err(Error::InvalidHeader("unsupported version".into()));
         }
 
         let seq = u32::from_le_bytes([buf[6], buf[7], buf[8], buf[9]]);
