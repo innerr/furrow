@@ -86,13 +86,33 @@ The HDD size reduction path in `CalculateTestFileSize()` (lines 215-217) never e
 
 **Fix Plan**:
 
-Option A (Recommended): Recompute file size after Phase 1
+Option A (Recommended): Estimate from detected disk type before sampling
+
+This preserves the current workflow:
+1. Size is chosen before the sampling test file is created
+2. Sampling runs against a file sized for the likely media type
+3. No mid-run file recreation is needed
+
+```go
+// cmd/run.go - before line 78
+estimatedDiskClass := analyzer.ClassifyFromDiskType(targetFS.DiskType)
+testFileSize := fio.CalculateTestFileSize(
+    targetFS.TotalBytes,
+    targetFS.FreeBytes,
+    estimatedDiskClass,
+)
+```
+
+This uses the existing helper in `internal/analyzer/classifier.go` and fixes the
+"HDD reduction path never executes" bug without changing benchmark flow.
+
+Option B: Recompute file size after Phase 1
 
 ```go
 // cmd/run.go - after line 93 (after sampleResult.DiskClass is set)
 sampleResult.DiskClass = analyzer.Classify(sampleResult)
-// Recompute test file size with correct disk class
-testFileSize = fio.CalculateTestFileSize(targetFS.TotalBytes, targetFS.FreeBytes, sampleResult.DiskClass)
+// Recompute test file size with measured disk class
+newFileSize := fio.CalculateTestFileSize(targetFS.TotalBytes, targetFS.FreeBytes, sampleResult.DiskClass)
 
 // If size changed significantly, recreate the test file
 if newFileSize != testFileSize {
@@ -105,25 +125,11 @@ if newFileSize != testFileSize {
 }
 ```
 
-Option B: Map `DiskType` to `DiskClass` for initial estimate
+**Trade-off**:
+- Option A is simpler and keeps the current execution model intact
+- Option B uses measured performance, but it changes the file under test after sampling and adds more state transitions
 
-Add a helper function:
-```go
-func estimateDiskClass(diskType string) types.DiskClass {
-    switch diskType {
-    case "nvme":
-        return types.DiskClassNVMeSSD
-    case "ssd":
-        return types.DiskClassSATASSD
-    case "hdd":
-        return types.DiskClassSlowHDD
-    default:
-        return types.DiskClassSlowHDD
-    }
-}
-```
-
-**Recommendation**: Option A is preferred as it uses actual measured performance for classification.
+**Recommendation**: Option A is preferred for this codebase. Option B is only justified if measured-class sizing is considered mandatory.
 
 ---
 
@@ -164,36 +170,44 @@ if size < GB {
 
 // After:
 maxAllowed := uint64(float64(freeSpace) * 0.25)
+minSize := uint64(GB)
 
-// Apply minimum only if it doesn't violate the cap
-minSize := GB
-if minSize > maxAllowed {
-    // Not enough free space for minimum, use maxAllowed
-    // Or return an error if we want to enforce a minimum
+if maxAllowed == 0 {
+    return 0
+}
+
+if size > maxAllowed {
     size = maxAllowed
-    if size < 64*MB {  // Absolute minimum (64MB)
-        return 0  // Caller should handle this as error
-    }
-} else {
-    if size > maxAllowed {
-        size = maxAllowed
-    }
-    if size < minSize {
-        size = minSize
-    }
+}
+
+// Only enforce the 1 GB minimum when it still respects the cap.
+if maxAllowed >= minSize && size < minSize {
+    size = minSize
 }
 ```
 
-**Alternative**: Add a validation function and return error if free space is insufficient:
+If the benchmark requires at least 1 GB to be meaningful, add an explicit
+validation step instead of silently inventing a second minimum inside
+`CalculateTestFileSize()`.
+
+**Recommended companion validation**:
 ```go
 func ValidateFreeSpace(freeSpace uint64) error {
-    minRequired := GB
-    if freeSpace < minRequired {
-        return fmt.Errorf("insufficient free space: need at least 1GB, have %s", formatBytes(freeSpace))
+    maxAllowed := uint64(float64(freeSpace) * 0.25)
+    if maxAllowed == 0 {
+        return fmt.Errorf("insufficient free space for benchmark file")
+    }
+    if maxAllowed < GB {
+        return fmt.Errorf("insufficient free space to satisfy both the 25%% cap and 1 GB minimum")
     }
     return nil
 }
 ```
+
+**Recommendation**: Keep `CalculateTestFileSize()` deterministic and cap-respecting.
+If insufficient free space should be fatal, surface that through a separate
+validation/error path and update the function signature or caller flow
+accordingly.
 
 ---
 
@@ -360,22 +374,24 @@ for k, v := range rw.LatencyUS.Pct {
 
 // Add helper function:
 func normalizePercentileKey(k string) string {
-    // fio returns keys like "99.000000", "99.900000", "99.990000"
-    // We want to convert to "p99", "p99.9", "p99.99"
-    var val float64
-    if _, err := fmt.Sscanf(k, "%f", &val); err != nil {
+    // fio returns keys like:
+    // "50.000000" -> "p50"
+    // "99.000000" -> "p99"
+    // "99.900000" -> "p99.9"
+    // "99.990000" -> "p99.99"
+    // "99.999000" -> "p99.999"
+    trimmed := strings.TrimRight(strings.TrimRight(k, "0"), ".")
+    if trimmed == "" {
         return "p" + k
     }
-    
-    // Format based on precision
-    if val == float64(int(val)) {
-        return fmt.Sprintf("p%d", int(val))
-    }
-    return fmt.Sprintf("p%.1f", val)  // or keep more precision as needed
+    return "p" + trimmed
 }
 ```
 
 Apply same change to the `LatencyNS` and `LatencyMS` loops.
+
+**Recommendation**: Avoid float parsing/formatting here. String trimming preserves
+fio's declared precision and prevents `99.99` from being rounded to `100.0`.
 
 ---
 
@@ -597,17 +613,24 @@ func (this *darwinCollector) getMemoryInfo() (uint64, uint64) {
     // Free memory: use vm_stat
     output, err = exec.Command("vm_stat").Output()
     if err == nil {
-        // vm_stat output: "Pages free:       123456."
+        // vm_stat output includes page size in the header, e.g.
+        // "Mach Virtual Memory Statistics: (page size of 4096 bytes)"
+        pageSize := uint64(4096)
         lines := strings.Split(string(output), "\n")
         for _, line := range lines {
+            if strings.Contains(line, "page size of") {
+                var parsed uint64
+                if _, err := fmt.Sscanf(line, "Mach Virtual Memory Statistics: (page size of %d bytes)", &parsed); err == nil && parsed > 0 {
+                    pageSize = parsed
+                }
+            }
             if strings.HasPrefix(line, "Pages free:") {
                 fields := strings.Fields(line)
                 if len(fields) >= 3 {
                     // Remove trailing period if present
                     countStr := strings.TrimSuffix(fields[2], ".")
                     pageCount, _ := strconv.ParseUint(countStr, 10, 64)
-                    // macOS page size is typically 4096 bytes
-                    free = pageCount * 4096
+                    free = pageCount * pageSize
                 }
                 break
             }
@@ -818,21 +841,24 @@ if sample.FsyncIOPS > 10000 {
 
 **Fix Plan**:
 
-Option A: Fix the test name
+Option A: Remove the dead skip reason entry
 ```go
 // internal/analyzer/strategy.go:52-53
-if sample.FsyncIOPS > 10000 {
-    strategy.SkipReasons["fsync_limit"] = "fsync IOPS already excellent (> 10K)"
-    delete(testsToRun, "fsync_limit")
-}
-```
-
-Option B: Remove dead code (if this feature is not intended)
-```go
 // Remove lines 52-54 entirely
 ```
 
-**Recommendation**: Option A if the intent is to skip fsync testing when performance is already excellent.
+Option B: Introduce a real separate deep-fsync test before adding skip logic
+```go
+// Example future direction only:
+// - add a new TestCatalog entry such as "fsync_deep"
+// - include it in the appropriate selection matrix
+// - then make sample.FsyncIOPS > 10000 skip that extra test
+```
+
+**Recommendation**: Option A is correct for the current codebase. `fsync_limit`
+is the only real fsync test today and is used by sampling, scoring, and report
+generation, so deleting it from the plan would change benchmark behavior rather
+than just fixing a bad skip-reason key.
 
 ---
 
@@ -849,24 +875,29 @@ This is always "1.0.0" regardless of the actual build version.
 
 **Fix Plan**:
 
-1. Add a version variable that can be set at build time:
+1. Add version variables in a package that matches the `-ldflags -X` target:
 
 ```go
-// cmd/run.go or a separate version.go
+// cmd/version.go
+package cmd
+
 var (
     Version   = "dev"
     GitCommit = "unknown"
     BuildDate = "unknown"
 )
 
-// Or in Makefile:
-// go build -ldflags "-X main.Version=$(VERSION) -X main.GitCommit=$(GIT_COMMIT)"
+// Then inject with:
+// go build -ldflags "-X github.com/innerr/furrow/benchmark/baseline/io/fio/cmd.Version=$(VERSION) \
+//                    -X github.com/innerr/furrow/benchmark/baseline/io/fio/cmd.GitCommit=$(GIT_COMMIT) \
+//                    -X github.com/innerr/furrow/benchmark/baseline/io/fio/cmd.BuildDate=$(BUILD_DATE)"
 ```
 
 2. Use the variable in buildReport:
 ```go
 // cmd/run.go:183
 ToolVersion: Version,
+ToolGitCommit: GitCommit,
 ```
 
 3. Build script example (Makefile):
@@ -876,11 +907,14 @@ GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 build:
-	go build -ldflags "-X main.Version=$(VERSION) \
-		-X main.GitCommit=$(GIT_COMMIT) \
-		-X main.BuildDate=$(BUILD_DATE)" \
-		-o bin/fio-bench ./cmd/...
+	go build -ldflags "-X github.com/innerr/furrow/benchmark/baseline/io/fio/cmd.Version=$(VERSION) \
+		-X github.com/innerr/furrow/benchmark/baseline/io/fio/cmd.GitCommit=$(GIT_COMMIT) \
+		-X github.com/innerr/furrow/benchmark/baseline/io/fio/cmd.BuildDate=$(BUILD_DATE)" \
+		-o bin/fio-bench .
 ```
+
+**Note**: If you prefer `main.Version`, then the variables must live in the
+root `main` package instead. The package path and the `-X` target must match.
 
 ---
 
