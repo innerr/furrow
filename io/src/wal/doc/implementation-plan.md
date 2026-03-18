@@ -85,12 +85,12 @@ Total: 64 bytes
 **Goal**: Replace tokio::fs with io_uring for true concurrent I/O
 
 **Tasks**:
-- [ ] Add tokio-uring dependency (target_os = "linux")
-- [ ] Conditional compilation for writer
-- [ ] Batch submission pattern
+- [x] Add tokio-uring dependency (target_os = "linux")
+- [x] Conditional compilation for writer
+- [x] Batch submission pattern
 - [ ] Registered file descriptors
 - [ ] Linked write + fsync
-- [ ] Fallback to tokio::fs on non-Linux
+- [x] Fallback to tokio::fs on non-Linux
 
 **Performance Tests**:
 - [ ] Throughput comparison (tokio::fs vs io_uring)
@@ -242,7 +242,7 @@ pub enum RecoveryMode {
 
 - Phase 1: [x] 100%
 - Phase 2: [x] 100%
-- Phase 3: [ ] 0%
+- Phase 3: [~] 70% (io_uring basic, needs advanced features)
 - Phase 4: [ ] 0%
 
 Last updated: 2026-03-18
