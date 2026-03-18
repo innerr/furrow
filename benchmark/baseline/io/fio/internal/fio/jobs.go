@@ -217,12 +217,18 @@ func CalculateTestFileSize(partitionSize, freeSpace uint64, diskClass types.Disk
 	}
 
 	maxAllowed := uint64(float64(freeSpace) * 0.25)
+	minSize := uint64(GB)
+
+	if maxAllowed == 0 {
+		return 0
+	}
+
 	if size > maxAllowed {
 		size = maxAllowed
 	}
 
-	if size < GB {
-		size = GB
+	if maxAllowed >= minSize && size < minSize {
+		size = minSize
 	}
 
 	return size
