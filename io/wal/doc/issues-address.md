@@ -5,6 +5,30 @@
 
 ---
 
+## Fix Log
+
+### Issue #1: Linux Backend Is Syntactically Broken - FIXED (2026-03-19)
+
+**Commit**: TBD
+
+**Actions Taken**:
+1. Deleted the broken `write_with_sync()` method (lines 135-195 in original)
+2. Implemented a proper `write()` method with the following improvements:
+   - Added `MAX_RECORD_SIZE` check before consuming LSN
+   - Kept LSN allocation and write in the same lock scope to ensure order consistency
+   - Properly handles all sync modes (Always, Batch, Never)
+   - Added `MAX_RECORD_SIZE` to imports from `record` module
+
+**Code Changes**:
+- `src/writer_uring.rs`: Replaced broken `write_with_sync()` with correct `write()` implementation
+- Import: Added `MAX_RECORD_SIZE` to `use crate::record::{...}`
+
+**Validation**:
+- ✅ `cargo build` compiles without errors
+- ✅ All 17 tests pass
+
+---
+
 ## Critical (P0) - Must Fix Before Production
 
 ### 1. Linux Backend Is Syntactically Broken
