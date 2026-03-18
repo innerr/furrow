@@ -3,13 +3,13 @@
 package metadata
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/innerr/furrow/benchmark/baseline/io/fio/internal/types"
@@ -142,9 +142,27 @@ func (this *darwinCollector) getMemoryInfo() (uint64, uint64) {
 		total, _ = strconv.ParseUint(strings.TrimSpace(string(output)), 10, 64)
 	}
 
-	var vmStat syscall.Statfs_t
-	if err := syscall.Statfs("/", &vmStat); err == nil {
-		free = vmStat.Bfree * uint64(vmStat.Bsize)
+	output, err = exec.Command("vm_stat").Output()
+	if err == nil {
+		pageSize := uint64(4096)
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "page size of") {
+				var parsed uint64
+				if _, err := fmt.Sscanf(line, "Mach Virtual Memory Statistics: (page size of %d bytes)", &parsed); err == nil && parsed > 0 {
+					pageSize = parsed
+				}
+			}
+			if strings.HasPrefix(line, "Pages free:") {
+				fields := strings.Fields(line)
+				if len(fields) >= 3 {
+					countStr := strings.TrimSuffix(fields[2], ".")
+					pageCount, _ := strconv.ParseUint(countStr, 10, 64)
+					free = pageCount * pageSize
+				}
+				break
+			}
+		}
 	}
 
 	return total, free
@@ -170,10 +188,11 @@ func (this *darwinCollector) getSwapInfo() (uint64, uint64) {
 }
 
 func (this *darwinCollector) parseSize(s string) uint64 {
-	s = strings.TrimSuffix(s, "M")
-	s = strings.TrimSuffix(s, "G")
+	isGB := strings.HasSuffix(s, "G")
+	s = strings.TrimSuffix(strings.TrimSuffix(s, "M"), "G")
+
 	val, _ := strconv.ParseFloat(s, 64)
-	if strings.HasSuffix(s, "G") {
+	if isGB {
 		return uint64(val * 1024 * 1024 * 1024)
 	}
 	return uint64(val * 1024 * 1024)
