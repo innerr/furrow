@@ -241,6 +241,39 @@
 - ✅ `cargo build` compiles without errors
 - ✅ All 18 tests pass
 
+### Issue #10: Configuration Surface Includes Unimplemented Options - SKIPPED
+
+**Status**: Skipped - options may be implemented in future
+
+**Analysis**:
+The following config options exist but are not implemented:
+- `preallocate_size`: Validated but never used for file preallocation
+- `create_if_missing`: Both backends always call `create_dir_all()`, ignoring this flag
+
+**Recommendation**: 
+These options are intentionally deferred. Either:
+1. Implement them when needed (preallocation can improve performance)
+2. Remove them to avoid misleading users (if not planned)
+
+**Current Decision**: Keep as-is for future implementation.
+
+---
+
+## Document Updates (2026-03-19)
+
+### design.md Updated
+
+Updated `design.md` to reflect current implementation after all fixes:
+
+1. **Removed Two-Phase Allocation**: Simplified to actual write flow
+2. **Updated Record Lifecycle**: Removed PENDING/COMMITTED states
+3. **Updated Configuration**: Reflects actual `WalConfig` structure
+4. **Updated Recovery Mechanism**: Added CRC validation, file truncation
+5. **Updated API**: Added `read_ordered()`, clarified truncate boundary
+6. **Added Truncate Behavior**: Documents `<=` boundary and rotation behavior
+7. **Added Known Issues table**: Summary of all resolved issues
+8. **Updated Module Structure**: Reflects actual file layout
+
 ---
 
 ## Critical (P0) - Must Fix Before Production
