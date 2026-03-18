@@ -824,6 +824,12 @@ func (this *linuxCollector) getCPUInfo() (string, int) {
 }
 ```
 
+**Fix Applied**: 
+- Date: 2026-03-19
+- Commit: Pending PR
+- Change: Track unique (physical_id, core_id) pairs instead of just physical_id
+- Files: `internal/metadata/collector_linux.go:134-171`
+
 ---
 
 ### 14. Recommendations treat missing scores as zero
