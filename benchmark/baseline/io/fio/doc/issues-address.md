@@ -227,6 +227,12 @@ If insufficient free space should be fatal, surface that through a separate
 validation/error path and update the function signature or caller flow
 accordingly.
 
+**Fix Applied**: 
+- Date: 2026-03-19
+- Commit: Pending PR
+- Change: Refactored size calculation logic with early return for insufficient space
+- Files: `internal/fio/jobs.go:219-234`
+
 ---
 
 ### 5. Report metadata drops the actual test file info and disk class
