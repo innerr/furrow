@@ -1,6 +1,7 @@
 package report
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -237,34 +238,54 @@ func TestGetReferenceValues(t *testing.T) {
 	tests := []struct {
 		name      string
 		diskClass types.DiskClass
-		checkFunc func(types.ScoreReferences) bool
+		expected  types.ScoreReferences
 	}{
 		{
 			name:      "NVMe SSD references",
 			diskClass: types.DiskClassNVMeSSD,
-			checkFunc: func(refs types.ScoreReferences) bool {
-				return refs.SeqReadBW.Excellent > 3000 && refs.RandReadIOPS.Excellent > 500000
+			expected: types.ScoreReferences{
+				SeqReadBW:     types.ReferenceValues{Excellent: 3500, Good: 2500, Fair: 1500, Poor: 500},
+				SeqWriteBW:    types.ReferenceValues{Excellent: 3000, Good: 2000, Fair: 1200, Poor: 400},
+				RandReadIOPS:  types.ReferenceValues{Excellent: 800000, Good: 500000, Fair: 200000, Poor: 50000},
+				RandWriteIOPS: types.ReferenceValues{Excellent: 700000, Good: 400000, Fair: 150000, Poor: 30000},
+				FsyncIOPS:     types.ReferenceValues{Excellent: 50000, Good: 30000, Fair: 15000, Poor: 5000},
+				MixedIOPS:     types.ReferenceValues{Excellent: 500000, Good: 300000, Fair: 150000, Poor: 50000},
 			},
 		},
 		{
 			name:      "SATA SSD references",
 			diskClass: types.DiskClassSATASSD,
-			checkFunc: func(refs types.ScoreReferences) bool {
-				return refs.SeqReadBW.Excellent > 400 && refs.RandReadIOPS.Excellent > 50000
+			expected: types.ScoreReferences{
+				SeqReadBW:     types.ReferenceValues{Excellent: 550, Good: 400, Fair: 250, Poor: 100},
+				SeqWriteBW:    types.ReferenceValues{Excellent: 520, Good: 380, Fair: 200, Poor: 80},
+				RandReadIOPS:  types.ReferenceValues{Excellent: 100000, Good: 70000, Fair: 40000, Poor: 10000},
+				RandWriteIOPS: types.ReferenceValues{Excellent: 90000, Good: 60000, Fair: 30000, Poor: 8000},
+				FsyncIOPS:     types.ReferenceValues{Excellent: 30000, Good: 15000, Fair: 8000, Poor: 2000},
+				MixedIOPS:     types.ReferenceValues{Excellent: 70000, Good: 50000, Fair: 30000, Poor: 10000},
 			},
 		},
 		{
 			name:      "HDD references",
 			diskClass: types.DiskClassFastHDD,
-			checkFunc: func(refs types.ScoreReferences) bool {
-				return refs.SeqReadBW.Excellent <= 300
+			expected: types.ScoreReferences{
+				SeqReadBW:     types.ReferenceValues{Excellent: 200, Good: 150, Fair: 100, Poor: 50},
+				SeqWriteBW:    types.ReferenceValues{Excellent: 200, Good: 150, Fair: 100, Poor: 50},
+				RandReadIOPS:  types.ReferenceValues{Excellent: 300, Good: 200, Fair: 100, Poor: 50},
+				RandWriteIOPS: types.ReferenceValues{Excellent: 300, Good: 200, Fair: 100, Poor: 50},
+				FsyncIOPS:     types.ReferenceValues{Excellent: 1000, Good: 500, Fair: 200, Poor: 50},
+				MixedIOPS:     types.ReferenceValues{Excellent: 200, Good: 150, Fair: 80, Poor: 30},
 			},
 		},
 		{
 			name:      "Unknown class uses HDD references",
 			diskClass: "Unknown",
-			checkFunc: func(refs types.ScoreReferences) bool {
-				return refs.SeqReadBW.Excellent <= 300
+			expected: types.ScoreReferences{
+				SeqReadBW:     types.ReferenceValues{Excellent: 200, Good: 150, Fair: 100, Poor: 50},
+				SeqWriteBW:    types.ReferenceValues{Excellent: 200, Good: 150, Fair: 100, Poor: 50},
+				RandReadIOPS:  types.ReferenceValues{Excellent: 300, Good: 200, Fair: 100, Poor: 50},
+				RandWriteIOPS: types.ReferenceValues{Excellent: 300, Good: 200, Fair: 100, Poor: 50},
+				FsyncIOPS:     types.ReferenceValues{Excellent: 1000, Good: 500, Fair: 200, Poor: 50},
+				MixedIOPS:     types.ReferenceValues{Excellent: 200, Good: 150, Fair: 80, Poor: 30},
 			},
 		},
 	}
@@ -272,8 +293,8 @@ func TestGetReferenceValues(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			refs := getReferenceValues(tt.diskClass)
-			if !tt.checkFunc(refs) {
-				t.Errorf("getReferenceValues() check failed for %v", tt.name)
+			if !reflect.DeepEqual(refs, tt.expected) {
+				t.Errorf("getReferenceValues() = %#v, want %#v", refs, tt.expected)
 			}
 		})
 	}
@@ -281,10 +302,10 @@ func TestGetReferenceValues(t *testing.T) {
 
 func TestGenerateRecommendations(t *testing.T) {
 	tests := []struct {
-		name          string
-		scores        map[string]int
-		diskClass     types.DiskClass
-		expectAtLeast int
+		name      string
+		scores    map[string]int
+		diskClass types.DiskClass
+		expected  []string
 	}{
 		{
 			name: "high performance",
@@ -296,8 +317,8 @@ func TestGenerateRecommendations(t *testing.T) {
 				"mixed":      90,
 				"fsync":      90,
 			},
-			diskClass:     types.DiskClassNVMeSSD,
-			expectAtLeast: 1,
+			diskClass: types.DiskClassNVMeSSD,
+			expected:  []string{"Well-suited for high-performance workloads"},
 		},
 		{
 			name: "low fsync score",
@@ -309,30 +330,58 @@ func TestGenerateRecommendations(t *testing.T) {
 				"mixed":      80,
 				"fsync":      50,
 			},
-			diskClass:     types.DiskClassNVMeSSD,
-			expectAtLeast: 1,
+			diskClass: types.DiskClassNVMeSSD,
+			expected: []string{
+				"Suitable for general-purpose workloads",
+				"Consider enabling write-back cache if data integrity allows",
+			},
 		},
 		{
-			name: "average performance",
+			name: "rand write bottleneck",
 			scores: map[string]int{
 				"seq_read":   70,
 				"seq_write":  70,
 				"rand_read":  70,
-				"rand_write": 70,
+				"rand_write": 50,
 				"mixed":      70,
 				"fsync":      70,
 			},
-			diskClass:     types.DiskClassNVMeSSD,
-			expectAtLeast: 1,
+			diskClass: types.DiskClassNVMeSSD,
+			expected:  []string{"Random write performance may benefit from larger queue depth"},
+		},
+		{
+			name: "general purpose recommendation",
+			scores: map[string]int{
+				"seq_read":   75,
+				"seq_write":  75,
+				"rand_read":  75,
+				"rand_write": 75,
+				"mixed":      75,
+				"fsync":      75,
+			},
+			diskClass: types.DiskClassNVMeSSD,
+			expected:  []string{"Suitable for general-purpose workloads"},
+		},
+		{
+			name: "fallback recommendation",
+			scores: map[string]int{
+				"seq_read":   60,
+				"seq_write":  60,
+				"rand_read":  60,
+				"rand_write": 60,
+				"mixed":      60,
+				"fsync":      70,
+			},
+			diskClass: types.DiskClassSlowHDD,
+			expected:  []string{"Performance is within expected range"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			recs := GenerateRecommendations(tt.scores, tt.diskClass)
-			if len(recs) < tt.expectAtLeast {
-				t.Errorf("GenerateRecommendations() returned %v recommendations, want at least %v",
-					len(recs), tt.expectAtLeast)
+			if !reflect.DeepEqual(recs, tt.expected) {
+				t.Errorf("GenerateRecommendations() = %#v, want %#v", recs, tt.expected)
 			}
 		})
 	}

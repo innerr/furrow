@@ -133,14 +133,11 @@ func TestGenerateStrategySkipRedundant(t *testing.T) {
 		}
 
 		if !skipped {
-			reason, hasReason := strategy.SkipReasons["seq_write_async_direct"]
-			if hasReason && reason == "read/write bandwidth within 10%" {
-				skipped = true
-			}
+			t.Fatal("seq_write_async_direct should be skipped when bandwidth is within 10%")
 		}
 
-		if !skipped {
-			t.Log("seq_write_async_direct was not skipped, which is valid if it's in TestsPlanned")
+		if reason := strategy.SkipReasons["seq_write_async_direct"]; reason != "read/write bandwidth within 10%" {
+			t.Fatalf("SkipReasons[seq_write_async_direct] = %q, want %q", reason, "read/write bandwidth within 10%")
 		}
 	})
 
@@ -164,14 +161,27 @@ func TestGenerateStrategySkipRedundant(t *testing.T) {
 		}
 
 		if !skipped {
-			reason, hasReason := strategy.SkipReasons["rand_write_4k_async_direct"]
-			if hasReason && reason == "read/write IOPS within 15%" {
-				skipped = true
+			t.Fatal("rand_write_4k_async_direct should be skipped when IOPS is within 15%")
+		}
+
+		latencyWriteSkipped := false
+		for _, test := range strategy.TestsSkipped {
+			if test == "latency_write" {
+				latencyWriteSkipped = true
+				break
 			}
 		}
 
-		if !skipped {
-			t.Log("rand_write_4k_async_direct was not skipped, which is valid if it's in TestsPlanned")
+		if !latencyWriteSkipped {
+			t.Fatal("latency_write should be skipped together with rand_write_4k_async_direct")
+		}
+
+		if reason := strategy.SkipReasons["rand_write_4k_async_direct"]; reason != "read/write IOPS within 15%" {
+			t.Fatalf("SkipReasons[rand_write_4k_async_direct] = %q, want %q", reason, "read/write IOPS within 15%")
+		}
+
+		if reason := strategy.SkipReasons["latency_write"]; reason != "read/write IOPS within 15%" {
+			t.Fatalf("SkipReasons[latency_write] = %q, want %q", reason, "read/write IOPS within 15%")
 		}
 	})
 

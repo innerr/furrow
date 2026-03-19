@@ -1,6 +1,7 @@
 package fio
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/innerr/furrow/benchmark/baseline/io/fio/internal/types"
@@ -52,11 +53,16 @@ func TestGetFioInfo(t *testing.T) {
 func TestGetIOEngine(t *testing.T) {
 	runner := &Runner{fioPath: "/usr/bin/fio", version: "fio-3.33"}
 
+	expectedLibaio := "libaio"
+	if runtime.GOOS == "darwin" {
+		expectedLibaio = "posixaio"
+	}
+
 	tests := []struct {
 		cfgEngine string
 		expected  string
 	}{
-		{"libaio", "posixaio"},
+		{"libaio", expectedLibaio},
 		{"posixaio", "posixaio"},
 		{"sync", "sync"},
 		{"io_uring", "io_uring"},
