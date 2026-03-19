@@ -1,0 +1,29 @@
+[package]
+name = "wal-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+furrow-io-wal = { path = "../wal" }
+tokio = { version = "1", features = ["full"] }
+criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
+tempfile = "3"
+rand = "0.8"
+
+[[bench]]
+name = "throughput"
+harness = false
+
+[[bench]]
+name = "latency"
+harness = false
+
+[[bench]]
+name = "sync_modes"
+harness = false
+
+[[bench]]
+name = "features"
+harness = false
+required-features = ["furrow-io-wal/compression", "furrow-io-wal/encryption"]

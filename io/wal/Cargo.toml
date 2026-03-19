@@ -27,3 +27,5 @@ libc = "0.2"
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }
 tempfile = "3"
+criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
+rand = "0.8"
