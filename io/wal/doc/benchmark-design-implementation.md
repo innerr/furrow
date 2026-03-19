@@ -2,21 +2,19 @@
 
 ## Overview
 
-This document describes a benchmark plan that can be implemented in the current `furrow-io-wal` repository without assuming extra crates already exist.
-
-The goal is to make benchmark work actionable today while reserving clear extension points for future comparison against `wal-single-thread`.
+This document describes a shared benchmark framework for WAL implementations. The framework supports testing both `wal` (concurrent) and `wal-single-thread` implementations with a unified test suite.
 
 ## Goals
 
-- Measure steady-state write throughput for the current `wal` implementation.
+- Measure steady-state write throughput for WAL implementations.
 - Measure per-write latency distribution under controlled conditions.
+- Compare `wal` and `wal-single-thread` performance characteristics.
 - Compare the impact of different `SyncMode` settings.
 - Measure optional feature overhead for compression and encryption.
-- Add a benchmark structure that can later compare `wal` and `wal-single-thread` without redesigning the suite.
+- Maintain stable benchmark naming for historical baseline comparisons.
 
 ## Non-Goals
 
-- Do not assume that `wal-single-thread` already exists.
 - Do not treat lifecycle operations such as temp directory creation, `Wal::open`, and `Wal::close` as part of steady-state throughput unless a benchmark explicitly targets lifecycle cost.
 - Do not claim percentile latency from a harness that only records end-to-end batch timings.
 
@@ -24,21 +22,20 @@ The goal is to make benchmark work actionable today while reserving clear extens
 
 ### Current Scope
 
-The first implementation phase targets the current crate only:
+The benchmark suite targets both WAL implementations:
 
-- Throughput benchmark by write size.
-- Latency benchmark with per-operation sampling.
-- Sync mode comparison.
-- Feature overhead comparison.
-- Concurrent writer benchmark using the current `Wal` API.
+- Throughput benchmark by write size (both implementations).
+- Latency benchmark with per-operation sampling (both implementations).
+- Sync mode comparison (both implementations).
+- Feature overhead comparison (both implementations).
+- Concurrent writer benchmark (wal only, wal-single-thread single writer).
+- Implementation comparison with identical test conditions.
 
 ### Planned Extension
 
-When `wal-single-thread` is added, the benchmark suite should extend to:
-
-- Compare `wal` and `wal-single-thread` with the same write sizes.
-- Compare both implementations under the same sync policy matrix.
-- Keep result naming stable so historical baselines remain comparable.
+- Result export in machine-readable formats (JSON, CSV).
+- Baseline management for regression detection.
+- Automated performance comparison reports.
 
 ## Benchmark Categories
 
@@ -70,6 +67,8 @@ Initial sizes:
 - 64 KiB
 - 256 KiB
 - 1 MiB
+- 2 MiB
+- 4 MiB
 
 ### 2. Latency
 
@@ -143,29 +142,39 @@ Writer counts:
 
 ## Repository Layout
 
-The benchmark layout should match the current single-crate repository:
+The benchmark uses a workspace structure with a shared benchmark crate:
 
 ```text
-wal/
-├── Cargo.toml
-├── benches/
-│   ├── common/
-│   │   └── mod.rs
-│   ├── throughput.rs
-│   ├── latency.rs
-│   ├── sync_modes.rs
-│   ├── features.rs
-│   └── concurrency.rs
-└── doc/
-    ├── benchmark-design.md
-    └── benchmark-design-implementation.md
+io/
+├── Cargo.toml                              # workspace root
+│   [workspace]
+│   members = ["wal", "wal-single-thread", "benches"]
+│
+├── wal/                                    # Concurrent implementation
+│   ├── src/
+│   └── Cargo.toml
+│
+├── wal-single-thread/                      # Single-threaded implementation
+│   ├── src/
+│   └── Cargo.toml
+│
+└── benches/                                # Shared benchmark suite
+    ├── Cargo.toml
+    ├── src/
+    │   └── lib.rs                         # Shared utilities
+    └── benches/
+        ├── throughput.rs
+        ├── latency.rs
+        ├── sync_modes.rs
+        ├── features.rs
+        └── concurrency.rs
 ```
 
-Future extension for `wal-single-thread`:
+Benefits of this structure:
 
-- shared benchmark helpers stay reusable
-- implementation-specific adapters can be added later
-- benchmark names should encode the implementation name explicitly
+- Independent evolution of each implementation
+- Shared test suite ensures consistent comparison
+- Single source of truth for benchmark methodology
 
 ## Harness Design
 
@@ -200,6 +209,24 @@ Reasoning:
 
 - throughput and latency are both important
 - a single harness should not force one metric to be measured poorly in order to collect the other
+
+### Implementation-Agnostic Macro
+
+```rust
+/// Macro to define benchmark for any WAL implementation
+#[macro_export]
+macro_rules! bench_wal_impl {
+    ($group:ident, $wal_ty:ty, $name:expr, $size:expr, $sync_mode:expr) => {
+        $group.bench_function(format!("{}_{}b", $name, $size), |b| {
+            b.iter(|| {
+                // Benchmark logic
+            })
+        });
+    };
+}
+```
+
+This allows writing benchmark code once and applying it to both implementations.
 
 ## Reporting Format
 
@@ -241,50 +268,64 @@ case=latency impl=wal size=4096 sync=always samples=100000 avg_us=9.5 p50_us=8.7
 Examples after implementation:
 
 ```bash
+# Run specific benchmark
 cargo bench --bench throughput
 cargo bench --bench latency
 cargo bench --bench sync_modes
 cargo bench --bench concurrency
 cargo bench --bench features --features compression,encryption
-```
 
-When `wal-single-thread` is added, comparison runs should keep the same benchmark names and add an implementation label rather than changing the whole report format.
+# Compare implementations
+cargo bench --bench throughput -- --save-baseline wal
+cargo bench --bench throughput -- --baseline wal  # Compare against saved baseline
+```
 
 ## Implementation Plan
 
-### Phase 1
+### Phase 1: Core Framework
 
-- add benchmark targets under `benches/`
-- add shared helpers in `benches/common/mod.rs`
-- implement `throughput.rs`
-- implement `latency.rs`
-- implement `sync_modes.rs`
-- implement `features.rs`
-- implement `concurrency.rs`
+- Create workspace Cargo.toml with members
+- Create benches/Cargo.toml and benches/src/lib.rs
+- Implement shared utilities in benches/src/lib.rs
+- Implement throughput.rs for both implementations
+- Implement latency.rs for both implementations
+- Implement sync_modes.rs
+- Implement features.rs
+- Implement concurrency.rs
 
-### Phase 2
+### Phase 2: wal-single-thread
 
-- add result export in a machine-readable format
-- document baseline numbers for a reference environment
+- Create wal-single-thread crate
+- Implement basic single-threaded WAL
+- Run comparison benchmarks
+- Document performance differences
 
-### Phase 3
+### Phase 3: Analysis & Tooling
 
-- add `wal-single-thread` adapters
-- add implementation comparison cases
-- add stable baseline naming for regression tracking
+- Add result export (JSON, CSV)
+- Document baseline numbers for reference environments
+- Create baseline management tooling
+- Add regression detection support
 
 ## Success Criteria
 
 Phase 1 is complete when:
 
-- benchmark targets compile
-- throughput benchmarks report MB/s and ops/s
+- workspace structure compiles with all three crates
+- throughput benchmarks report MB/s and ops/s for both implementations
 - latency benchmarks report percentile summaries
-- sync mode comparisons run against the current `wal` crate
+- sync mode comparisons run against both implementations
 - feature overhead can be measured through feature flags
 - concurrent writer behavior can be measured with repeatable commands
 
+Phase 2 is complete when:
+
+- wal-single-thread crate compiles and passes tests
+- comparison benchmarks run successfully
+- performance differences are documented
+
 Phase 3 is complete when:
 
-- `wal` and `wal-single-thread` can be benchmarked by the same suite
-- results can be compared case by case without renaming the benchmark matrix
+- results can be exported in machine-readable formats
+- baseline management tooling is available
+- regression detection is automated
