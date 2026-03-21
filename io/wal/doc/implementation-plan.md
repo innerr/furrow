@@ -251,3 +251,28 @@ pub enum RecoveryMode {
 - Phase 4: [x] 100%
 
 Last updated: 2026-03-18
+
+---
+
+## Review Notes (2026-03-21)
+
+### Accurate Observations
+
+1. **Phase 3 performance tests unchecked** - Implementation done, but no benchmark data collected yet
+2. **Preallocate not implemented** - `preallocate_size` defined in config but unused in code
+3. **wal-single-thread not implemented** - Only design doc exists, no actual code
+4. **`create_if_missing` unused** - Config field exists but not utilized
+5. **`uring_advanced.rs` unused** - Module exists but not integrated
+
+### Corrected Misconceptions
+
+1. **Zero-copy read path** - NOT a concern. `Record { data: Vec<u8> }` is intentional design. Zero-copy is a future optimization, not a missing feature.
+
+2. **Memory backpressure** - NOT applicable. Current architecture writes directly to file on each `write()` call. No internal buffer pool or async queue exists, so there's no unbounded buffer growth risk.
+
+### Recommended Next Steps
+
+1. Run Phase 3 performance benchmarks (tokio vs io_uring comparison)
+2. Decide: implement or remove `wal-single-thread` experiment
+3. Either implement `preallocate_size` or remove it from config
+4. Clean up unused fields: `create_if_missing`, or document their purpose
